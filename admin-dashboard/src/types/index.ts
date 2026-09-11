@@ -27,13 +27,22 @@ export interface MeshNodeStatus {
   nodeId: string;
   name: string;
   role: 'PHONE_RELAY' | 'GATEWAY' | 'VEHICLE_NODE' | 'CAMP_STATION';
-  batteryLevel: number;
-  lat: number;
-  lng: number;
-  zone: string;
+  batteryLevel?: number;
+  lat?: number;
+  lng?: number;
+  accuracyMeters?: number;
+  zone?: string;
   connectedPeersCount: number;
+  nearbyPeerIds?: string[];
   messagesInQueue: number;
   lastSeenMs: number;
+  lastSeenAt?: string;
+  locationObservedAt?: string;
+  lastGatewayContactAt?: string;
+  transportMode?: 'MOCK_IN_PROCESS' | 'DEV_EMULATOR_MESH' | 'NATIVE_BLE';
+  connectionState?: 'ONLINE_DIRECT' | 'OFFLINE_RELAYED' | 'STALE';
+  connectivitySource?: 'DIRECT' | 'RELAYED';
+  relayedByNodeId?: string;
   isOnlineGateway: boolean;
 }
 

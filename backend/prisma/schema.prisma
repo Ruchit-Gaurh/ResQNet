@@ -281,3 +281,26 @@ model SyncMessage {
   @@index([deviceId])
   @@index([messageType])
 }
+
+model DevicePresence {
+  nodeId               String    @id
+  displayName          String
+  transportMode        String
+  connectivitySource   String
+  latitude             Float?
+  longitude            Float?
+  accuracyMeters       Float?
+  zone                 String?
+  locationObservedAt   DateTime?
+  presenceObservedAt   DateTime
+  lastGatewayContactAt DateTime
+  relayedByNodeId      String?
+  nearbyPeerIds        Json
+  queuedMessageCount   Int       @default(0)
+  firstSeenAt          DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@index([lastGatewayContactAt])
+  @@index([connectivitySource])
+  @@index([locationObservedAt])
+}

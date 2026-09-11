@@ -1,5 +1,6 @@
 import type {
   DisasterCase,
+  DevicePresenceTelemetry,
   GeoLocation,
   MeshEnvelope,
   SafeCheckIn,
@@ -179,8 +180,11 @@ export class ReportSubmissionService {
     return this.submitEnvelope('SIGHTING', 'NORMAL', payload, SIGHTING_TTL_MS);
   }
 
-  async syncWithGateway(gatewayUrl: string): Promise<SyncBatchResponse> {
-    const response = await this.mesh.syncWithGateway(gatewayUrl);
+  async syncWithGateway(
+    gatewayUrl: string,
+    deviceTelemetry?: DevicePresenceTelemetry,
+  ): Promise<SyncBatchResponse> {
+    const response = await this.mesh.syncWithGateway(gatewayUrl, deviceTelemetry);
     await this.localQueue.applySyncResponse(response);
     return response;
   }

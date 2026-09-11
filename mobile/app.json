@@ -11,6 +11,12 @@
     "plugins": [
       "./plugins/withResQNetBle",
       [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow ResQNet to share this device's last known location with authorized disaster responders."
+        }
+      ],
+      [
         "expo-image-picker",
         {
           "photosPermission": "Allow ResQNet to attach a photo to this disaster report.",

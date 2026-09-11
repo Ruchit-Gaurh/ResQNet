@@ -11,6 +11,11 @@ vi.mock('../config/database', () => {
         findUnique: vi.fn(),
         create: vi.fn(),
       },
+      devicePresence: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        upsert: vi.fn().mockResolvedValue({}),
+        findMany: vi.fn().mockResolvedValue([]),
+      },
       case: {
         create: vi.fn(),
         findUnique: vi.fn().mockResolvedValue(null),
@@ -224,5 +229,82 @@ describe('Sync Module API (Idempotent Mesh Gateway)', () => {
     });
     expect(res.status).toBe(403);
     expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('records direct device presence without requiring an outbound report', async () => {
+    const res = await fetch(`${baseUrl}/api/v1/sync/batch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${publicToken}`,
+      },
+      body: JSON.stringify({
+        deviceId: 'DEVICE-NODE-1',
+        lastSyncTimestamp: 0,
+        outboundEnvelopes: [],
+        deviceTelemetry: {
+          nodeId: 'DEVICE-NODE-1',
+          displayName: 'ResQNet-NODE01',
+          observedAt: Date.now(),
+          locationObservedAt: Date.now(),
+          location: { lat: 26.9124, lng: 75.7873, accuracyMeters: 25 },
+          locationPermission: 'GRANTED',
+          transportMode: 'NATIVE_BLE',
+          nearbyPeerIds: ['OFFLINE-NODE-2'],
+          queuedMessageCount: 2,
+        },
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(prisma.devicePresence.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        nodeId: 'DEVICE-NODE-1',
+        connectivitySource: 'DIRECT',
+        latitude: 26.9124,
+      }),
+    }));
+  });
+
+  it('records an offline node presence capsule as carried by the syncing gateway', async () => {
+    (prisma.syncMessage.findUnique as any).mockResolvedValue(null);
+    const observedAt = Date.now() - 60_000;
+    const res = await fetch(`${baseUrl}/api/v1/sync/batch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${publicToken}`,
+      },
+      body: JSON.stringify({
+        deviceId: 'DEVICE-NODE-1',
+        lastSyncTimestamp: 0,
+        outboundEnvelopes: [{
+          ...sampleEnvelope,
+          messageId: 'presence-offline-node-2',
+          messageType: 'NETWORK_STATUS',
+          priority: 'LOW',
+          payload: {
+            nodeId: 'OFFLINE-NODE-2',
+            displayName: 'ResQNet-OFF002',
+            observedAt,
+            location: { lat: 26.913, lng: 75.788, accuracyMeters: 50 },
+            locationObservedAt: observedAt,
+            locationPermission: 'GRANTED',
+            transportMode: 'NATIVE_BLE',
+            nearbyPeerIds: ['DEVICE-NODE-1'],
+            queuedMessageCount: 4,
+          },
+        }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(prisma.devicePresence.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        nodeId: 'OFFLINE-NODE-2',
+        connectivitySource: 'RELAYED',
+        relayedByNodeId: 'DEVICE-NODE-1',
+      }),
+    }));
   });
 });

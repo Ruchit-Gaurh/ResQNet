@@ -242,6 +242,23 @@ export interface NetworkHealthStatus {
   batteryMode: 'NORMAL' | 'BATTERY_SAVER' | 'EMERGENCY_RELAY';
 }
 
+/**
+ * Privacy-limited device presence advertised to authorized responders.
+ * `observedAt` describes when the originating phone measured this state. A
+ * gateway may upload the capsule much later after carrying it over the mesh.
+ */
+export interface DevicePresenceTelemetry {
+  nodeId: string;
+  displayName: string;
+  observedAt: number;
+  location?: GeoLocation;
+  locationObservedAt?: number;
+  locationPermission: 'GRANTED' | 'DENIED' | 'UNAVAILABLE';
+  transportMode: 'MOCK_IN_PROCESS' | 'DEV_EMULATOR_MESH' | 'NATIVE_BLE';
+  nearbyPeerIds: string[];
+  queuedMessageCount: number;
+}
+
 // ==========================================
 // 6. Sync Engine Request / Response
 // ==========================================
@@ -250,6 +267,8 @@ export interface SyncBatchRequest {
   deviceId: string;
   lastSyncTimestamp: number;
   outboundEnvelopes: MeshEnvelope[];
+  /** Optional for backward compatibility with older clients. */
+  deviceTelemetry?: DevicePresenceTelemetry;
 }
 
 export interface SyncBatchResponse {

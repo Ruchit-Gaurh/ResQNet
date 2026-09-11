@@ -30,7 +30,6 @@ module.exports = function withResQNetBle(config) {
     });
     upsertPermission(manifest, {
       'android:name': 'android.permission.ACCESS_FINE_LOCATION',
-      'android:maxSdkVersion': '30',
     });
     upsertPermission(manifest, {
       'android:name': 'android.permission.BLUETOOTH_SCAN',

@@ -2,6 +2,7 @@ import type {
   MeshEnvelope,
   NetworkHealthStatus,
   SyncBatchRequest,
+  DevicePresenceTelemetry,
   SyncBatchResponse,
 } from '../../shared/types/index';
 import {
@@ -209,13 +210,17 @@ export class DevMeshTransport implements MeshTransportService {
     };
   }
 
-  async syncWithGateway(gatewayUrl: string): Promise<SyncBatchResponse> {
+  async syncWithGateway(
+    gatewayUrl: string,
+    deviceTelemetry?: DevicePresenceTelemetry,
+  ): Promise<SyncBatchResponse> {
     this.ensureInitialized();
     const outboundEnvelopes = await this.queue.getAll();
     const request: SyncBatchRequest = {
       deviceId: this.nodeId,
       lastSyncTimestamp: this.lastSuccessfulSyncTimestamp ?? 0,
       outboundEnvelopes,
+      deviceTelemetry,
     };
     try {
       const response = await this.gatewayClient.sync(gatewayUrl, request);

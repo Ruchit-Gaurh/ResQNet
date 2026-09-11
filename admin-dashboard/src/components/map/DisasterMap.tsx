@@ -87,36 +87,6 @@ const createPhoneClusterIcon = (cluster: PhoneMeshCluster, isSelected: boolean) 
   });
 };
 
-// Clean Flood Hazard Marker
-const createCleanFloodIcon = (label: string) => {
-  return L.divIcon({
-    className: 'clean-flood-pin',
-    html: `
-      <div style="display: flex; items-center; gap: 4px; background: #0284c7; color: #ffffff; border: 2px solid #ffffff; border-radius: 6px; padding: 2px 6px; font-size: 10px; font-weight: 800; box-shadow: 0 3px 8px rgba(2, 132, 199, 0.4); cursor: pointer; white-space: nowrap;">
-        <span>🌊</span> <span>${label}</span>
-      </div>
-    `,
-    iconSize: [110, 26],
-    iconAnchor: [55, 13],
-    popupAnchor: [0, -14]
-  });
-};
-
-// Clean Quake Hazard Marker
-const createCleanQuakeIcon = (label: string) => {
-  return L.divIcon({
-    className: 'clean-quake-pin',
-    html: `
-      <div style="display: flex; items-center; gap: 4px; background: #ea580c; color: #ffffff; border: 2px solid #ffffff; border-radius: 6px; padding: 2px 6px; font-size: 10px; font-weight: 800; box-shadow: 0 3px 8px rgba(234, 88, 12, 0.4); cursor: pointer; white-space: nowrap;">
-        <span>🏚️</span> <span>${label}</span>
-      </div>
-    `,
-    iconSize: [110, 26],
-    iconAnchor: [55, 13],
-    popupAnchor: [0, -14]
-  });
-};
-
 // People Icons
 const createPersonIcon = (c: DisasterCase, isSelected: boolean) => {
   const isMissing = c.type === 'MISSING';
@@ -158,6 +128,21 @@ const createFacilityIcon = (facility: FacilityLocation) => {
   });
 };
 
+const createDeviceIcon = (node: MeshNodeStatus) => {
+  const color = node.connectionState === 'ONLINE_DIRECT'
+    ? '#059669'
+    : node.connectionState === 'OFFLINE_RELAYED'
+      ? '#d97706'
+      : '#64748b';
+  return L.divIcon({
+    className: 'resqnet-device-pin',
+    html: `<div style="width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:${color};border:3px solid white;box-shadow:0 3px 10px rgba(15,23,42,.3);font-size:15px">📱</div>`,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
+    popupAnchor: [0, -15],
+  });
+};
+
 export const DisasterMap: React.FC<DisasterMapProps> = ({
   zones,
   facilities,
@@ -178,20 +163,31 @@ export const DisasterMap: React.FC<DisasterMapProps> = ({
   const [showFacilities, setShowFacilities] = useState<boolean>(true);
   const [showCases, setShowCases] = useState<boolean>(true);
   const [showPhoneMesh, setShowPhoneMesh] = useState<boolean>(true);
-  const [showDisasters, setShowDisasters] = useState<boolean>(true);
 
   // Selected Phone Cluster Drawer state
   const [activeCluster, setActiveCluster] = useState<PhoneMeshCluster | null>(null);
-
-  // Selected Incident Inspection Drawer State
   const [activeIncidentModal, setActiveIncidentModal] = useState<any | null>(null);
 
   // Focus coordinates
-  const [flyTarget, setFlyTarget] = useState<[number, number] | null>([28.6139, 77.2090]);
-  const [zoomLevel, setZoomLevel] = useState<number>(14);
+  const firstLocatedNode = meshNodes.find((node) => typeof node.lat === 'number' && typeof node.lng === 'number');
+  const firstLocatedCase = cases.find((item) => item.lastKnownLocation);
+  const initialTarget: [number, number] = firstLocatedNode
+    ? [firstLocatedNode.lat as number, firstLocatedNode.lng as number]
+    : firstLocatedCase?.lastKnownLocation
+      ? [firstLocatedCase.lastKnownLocation.lat, firstLocatedCase.lastKnownLocation.lng]
+      : [20.5937, 78.9629];
+  const [flyTarget, setFlyTarget] = useState<[number, number] | null>(initialTarget);
+  const [zoomLevel, setZoomLevel] = useState<number>(firstLocatedNode || firstLocatedCase ? 14 : 5);
+
+  useEffect(() => {
+    if (firstLocatedNode) {
+      setFlyTarget([firstLocatedNode.lat as number, firstLocatedNode.lng as number]);
+      setZoomLevel(15);
+    }
+  }, [firstLocatedNode?.nodeId]);
 
   // Total active phones calculation
-  const totalPhonesCount = phoneClusters.reduce((acc, curr) => acc + curr.phoneCount, 0);
+  const totalPhonesCount = meshNodes.length;
 
   // Centroid helper for privacy mode
   const getCentroid = (coords: [number, number][]): [number, number] => {
@@ -240,13 +236,18 @@ export const DisasterMap: React.FC<DisasterMapProps> = ({
     });
 
   // P2P Bluetooth Mesh Multi-Hop Connection Polyline
-  const p2pMeshConnectionRoutes: [number, number][] = [
-    [28.6130, 77.2085], // Zone A Citizens Phone Cluster
-    [28.6165, 77.2120], // Volunteer Courier Mules
-    [28.6145, 77.2110], // Relief Camp #1 Station
-    [28.6195, 77.2165], // Hospital Trauma Medics
-    [28.6210, 77.2190]  // Starlink Gateway
-  ];
+  const p2pMeshConnections = meshNodes.flatMap((node) => {
+    if (typeof node.lat !== 'number' || typeof node.lng !== 'number') return [];
+    return (node.nearbyPeerIds ?? []).flatMap((peerId) => {
+      if (node.nodeId.localeCompare(peerId) >= 0) return [];
+      const peer = meshNodes.find((candidate) => candidate.nodeId === peerId);
+      if (!peer || typeof peer.lat !== 'number' || typeof peer.lng !== 'number') return [];
+      return [[
+        [node.lat as number, node.lng as number],
+        [peer.lat, peer.lng],
+      ] as [number, number][]];
+    });
+  });
 
   const handleZoneSelect = (zoneId: string) => {
     setSelectedZone(zoneId);
@@ -285,9 +286,7 @@ export const DisasterMap: React.FC<DisasterMapProps> = ({
           <div className="flex gap-1 bg-slate-100 p-0.5 rounded border border-slate-200">
             {[
               { id: 'ALL', label: 'All Sectors' },
-              { id: 'ZONE-A', label: 'Zone A (Flood)' },
-              { id: 'ZONE-B', label: 'Zone B (Hospital)' },
-              { id: 'ZONE-C', label: 'Zone C (Quake)' }
+              ...zones.map((zone) => ({ id: zone.id, label: zone.name })),
             ].map((z) => (
               <button
                 key={z.id}
@@ -315,18 +314,8 @@ export const DisasterMap: React.FC<DisasterMapProps> = ({
               className="rounded border-slate-300 text-blue-600 focus:ring-0"
             />
             <span className="font-bold text-[11px] text-blue-800 flex items-center gap-1">
-              <span>📱</span> P2P Phones ({totalPhonesCount || 37})
+              <span>📱</span> ResQNet devices ({totalPhonesCount})
             </span>
-          </label>
-
-          <label className="flex items-center gap-1 cursor-pointer text-slate-700 hover:text-slate-900 select-none">
-            <input
-              type="checkbox"
-              checked={showDisasters}
-              onChange={(e) => setShowDisasters(e.target.checked)}
-              className="rounded border-slate-300 text-blue-600 focus:ring-0"
-            />
-            <span className="font-medium text-[11px]">Disasters</span>
           </label>
 
           <label className="flex items-center gap-1 cursor-pointer text-slate-700 hover:text-slate-900 select-none">
@@ -386,8 +375,8 @@ export const DisasterMap: React.FC<DisasterMapProps> = ({
       {/* Main Map Canvas */}
       <div className="relative w-full h-[520px] rounded-xl overflow-hidden border border-slate-300 shadow-md bg-slate-100">
         <MapContainer
-          center={[28.6139, 77.2090]}
-          zoom={14}
+          center={initialTarget}
+          zoom={firstLocatedNode || firstLocatedCase ? 14 : 5}
           scrollWheelZoom={true}
           style={{ width: '100%', height: '100%' }}
         >
@@ -442,74 +431,47 @@ export const DisasterMap: React.FC<DisasterMapProps> = ({
               </Polygon>
             ))}
 
-          {/* Clean Disaster Hazard Markers (No clutter) */}
-          {showDisasters && (
-            <>
-              {/* Flood Breach Point */}
-              <Marker
-                position={[28.6148, 77.2065]}
-                icon={createCleanFloodIcon('Flood Breach +2.4m')}
-                eventHandlers={{
-                  click: () => {
-                    setActiveIncidentModal({
-                      title: 'Zone A River Embankment Breach Point',
-                      type: 'FLASH_FLOOD',
-                      severity: 'CRITICAL',
-                      waterLevel: '+2.4m Above Danger Mark',
-                      flowRate: '14,800 cusecs (Surging)',
-                      damage: '65-meter river wall fracture; floodwaters overflowing into Sector 4 residential corridor.',
-                      photoUrl: 'https://images.unsplash.com/photo-1547683905-f686c993aae5?w=600&auto=format&fit=crop&q=80',
-                      responders: '3 Amphibious NDRF boats active; 18 civilians evacuated.',
-                      status: 'EVACUATION ACTIVE'
-                    });
-                  }
-                }}
-              />
-
-              {/* Quake Collapse Point */}
-              <Marker
-                position={[28.6080, 77.2250]}
-                icon={createCleanQuakeIcon('Sector 9 Rubble (85%)')}
-                eventHandlers={{
-                  click: () => {
-                    setActiveIncidentModal({
-                      title: 'Sector 9 Industrial Block B — Factory Collapse',
-                      type: 'STRUCTURAL_COLLAPSE',
-                      severity: 'CATASTROPHIC',
-                      waterLevel: 'Ground Subsidence',
-                      flowRate: 'M5.4 Sub-surface Tremor',
-                      damage: 'Heavy concrete slab failure. 3 trapped survivors located by acoustic sensors in cavity #3.',
-                      photoUrl: 'https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?w=600&auto=format&fit=crop&q=80',
-                      responders: 'Search & rescue dog team deployed with hydraulic cutters.',
-                      status: 'ACOUSTIC MICROPHONES ACTIVE'
-                    });
-                  }
-                }}
-              />
-            </>
-          )}
-
           {/* ================================================================ */}
           {/* P2P SMARTPHONE MESH NETWORK (Shows how many phones are where)     */}
           {/* ================================================================ */}
           {showPhoneMesh && (
             <>
               {/* Animated P2P BLE Packet Relay Links */}
-              <Polyline
-                positions={p2pMeshConnectionRoutes}
-                pathOptions={{
-                  color: '#2563eb',
-                  weight: 3,
-                  dashArray: '6, 8',
-                  opacity: 0.85
-                }}
-              >
-                <Tooltip direction="top">
-                  <span className="font-mono text-[11px] font-bold text-blue-800 bg-white p-1 rounded shadow-xs">
-                    P2P Bluetooth Low Energy Store-and-Forward Mesh Backbone (37 Phones Connected)
-                  </span>
-                </Tooltip>
-              </Polyline>
+              {p2pMeshConnections.map((route, index) => (
+                <Polyline
+                  key={`mesh-link-${index}`}
+                  positions={route}
+                  pathOptions={{ color: '#2563eb', weight: 3, dashArray: '6, 8', opacity: 0.75 }}
+                >
+                  <Tooltip direction="top">
+                    <span className="font-mono text-[11px] font-bold text-blue-800">
+                      Last reported nearby-device encounter
+                    </span>
+                  </Tooltip>
+                </Polyline>
+              ))}
+
+              {meshNodes.map((node) => {
+                if (typeof node.lat !== 'number' || typeof node.lng !== 'number') return null;
+                const directlyOnline = node.connectionState === 'ONLINE_DIRECT';
+                return (
+                  <Marker key={node.nodeId} position={[node.lat, node.lng]} icon={createDeviceIcon(node)}>
+                    <Popup>
+                      <div className="min-w-[230px] text-xs">
+                        <div className="font-bold text-slate-900">{node.name}</div>
+                        <div className="font-mono text-[10px] text-slate-500">{node.nodeId}</div>
+                        <div className={`mt-2 font-bold ${directlyOnline ? 'text-emerald-700' : 'text-amber-700'}`}>
+                          {directlyOnline ? 'Online directly' : node.connectionState === 'OFFLINE_RELAYED' ? 'Offline · location carried by a nearby phone' : 'Last seen · stale'}
+                        </div>
+                        <div className="mt-1 text-slate-600">Last seen {new Date(node.lastSeenAt ?? Date.now()).toLocaleString()}</div>
+                        {node.relayedByNodeId && <div className="mt-1 text-slate-600">Delivered by <span className="font-mono">{node.relayedByNodeId}</span></div>}
+                        <div className="mt-1 text-slate-600">Nearby peers: {node.connectedPeersCount} · Queue: {node.messagesInQueue}</div>
+                        {node.accuracyMeters != null && <div className="mt-1 text-slate-500">Reported accuracy ±{Math.round(node.accuracyMeters)} m</div>}
+                      </div>
+                    </Popup>
+                  </Marker>
+                );
+              })}
 
               {/* Phone Cluster Markers with Exact Phone Count Badges */}
               {activeClusters.map((cluster) => (
@@ -630,20 +592,12 @@ export const DisasterMap: React.FC<DisasterMapProps> = ({
         {/* Floating Map HUD Legend */}
         <div className="absolute bottom-3 left-3 z-[400] bg-white/95 backdrop-blur-xs border border-slate-300 rounded-lg p-2.5 shadow-lg text-xs space-y-1.5 max-w-[200px] pointer-events-auto">
           <div className="font-extrabold text-[11px] text-slate-900 uppercase tracking-wider border-b border-slate-200 pb-1 flex items-center justify-between">
-            <span>Tactical Legend</span>
-            <span className="text-[9px] bg-blue-100 text-blue-800 px-1 rounded font-bold">OSM LIVE</span>
+            <span>Live map legend</span>
+            <span className="text-[9px] bg-blue-100 text-blue-800 px-1 rounded font-bold">5s refresh</span>
           </div>
           <div className="flex items-center gap-2 text-slate-700 text-[11px]">
             <span className="text-xs">📱</span>
-            <span>P2P Phone Mesh Nodes</span>
-          </div>
-          <div className="flex items-center gap-2 text-slate-700 text-[11px]">
-            <span className="text-xs">🌊</span>
-            <span>Flood Breach Point</span>
-          </div>
-          <div className="flex items-center gap-2 text-slate-700 text-[11px]">
-            <span className="text-xs">🏚️</span>
-            <span>Quake Rubble Collapse</span>
+            <span>Device (green online, amber relayed)</span>
           </div>
           <div className="flex items-center gap-2 text-slate-700 text-[11px]">
             <span className="w-2.5 h-2.5 rounded-full bg-red-600 border border-white"></span>

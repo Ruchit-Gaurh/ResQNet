@@ -2,13 +2,68 @@ import prisma from '../../config/database';
 import { generateCaseId, generateSightingId, generateCheckInId } from '../../utils/id-generator';
 import { auditService, AuditActions } from '../audit/audit.service';
 import { matchingService } from '../matching/matching.service';
-import type { SyncBatchInput } from './sync.validation';
+import { deviceTelemetrySchema, type SyncBatchInput } from './sync.validation';
 import type { MeshMessageType, PriorityLevel, ReportSource } from '@prisma/client';
 
 type CreatedCaseForMatching = { id: string; type: 'MISSING' | 'FOUND' | 'UNIDENTIFIED_PATIENT' };
+type DeviceTelemetry = NonNullable<SyncBatchInput['deviceTelemetry']>;
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+async function recordDevicePresence(
+  telemetry: DeviceTelemetry,
+  connectivitySource: 'DIRECT' | 'RELAYED',
+  relayedByNodeId?: string,
+): Promise<void> {
+  const existing = await prisma.devicePresence.findUnique({ where: { nodeId: telemetry.nodeId } });
+  const observedAt = new Date(telemetry.observedAt);
+  const now = new Date();
+
+  // A delayed store-carry-forward capsule must never overwrite a newer direct
+  // observation. Its gateway receipt is still recorded by SyncMessage.
+  if (existing && existing.presenceObservedAt > observedAt) return;
+
+  const location = telemetry.location;
+  await prisma.devicePresence.upsert({
+    where: { nodeId: telemetry.nodeId },
+    create: {
+      nodeId: telemetry.nodeId,
+      displayName: telemetry.displayName,
+      transportMode: telemetry.transportMode,
+      connectivitySource,
+      latitude: location?.lat,
+      longitude: location?.lng,
+      accuracyMeters: location?.accuracyMeters,
+      zone: location?.zone,
+      locationObservedAt: telemetry.locationObservedAt
+        ? new Date(telemetry.locationObservedAt)
+        : location ? observedAt : undefined,
+      presenceObservedAt: observedAt,
+      lastGatewayContactAt: now,
+      relayedByNodeId: connectivitySource === 'RELAYED' ? relayedByNodeId : undefined,
+      nearbyPeerIds: telemetry.nearbyPeerIds,
+      queuedMessageCount: telemetry.queuedMessageCount,
+    },
+    update: {
+      displayName: telemetry.displayName,
+      transportMode: telemetry.transportMode,
+      connectivitySource,
+      latitude: location?.lat,
+      longitude: location?.lng,
+      accuracyMeters: location?.accuracyMeters,
+      zone: location?.zone,
+      locationObservedAt: telemetry.locationObservedAt
+        ? new Date(telemetry.locationObservedAt)
+        : location ? observedAt : existing?.locationObservedAt ?? undefined,
+      presenceObservedAt: observedAt,
+      lastGatewayContactAt: now,
+      relayedByNodeId: connectivitySource === 'RELAYED' ? relayedByNodeId : null,
+      nearbyPeerIds: telemetry.nearbyPeerIds,
+      queuedMessageCount: telemetry.queuedMessageCount,
+    },
+  });
 }
 
 function timelineCopy(action: string, metadata: unknown): { title: string; description: string } {
@@ -42,8 +97,24 @@ export const syncService = {
     const acknowledgedMessageIds: string[] = [];
     const errors: { messageId: string; error: string }[] = [];
 
+    if (request.deviceTelemetry?.nodeId === request.deviceId) {
+      await recordDevicePresence(request.deviceTelemetry, 'DIRECT');
+    }
+
     for (const envelope of request.outboundEnvelopes) {
       try {
+        if (envelope.messageType === 'NETWORK_STATUS') {
+          const telemetryResult = deviceTelemetrySchema.safeParse(envelope.payload);
+          if (telemetryResult.success) {
+            const source = telemetryResult.data.nodeId === request.deviceId ? 'DIRECT' : 'RELAYED';
+            await recordDevicePresence(
+              telemetryResult.data,
+              source,
+              source === 'RELAYED' ? request.deviceId : undefined,
+            );
+          }
+        }
+
         // Check if already processed (idempotency)
         const existing = await prisma.syncMessage.findUnique({
           where: { messageId: envelope.messageId },

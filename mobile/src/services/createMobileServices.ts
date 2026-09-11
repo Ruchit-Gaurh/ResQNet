@@ -29,6 +29,7 @@ import { LocalQueueService, type ReceivedMeshRecord } from './LocalQueueService'
 import { ReportSubmissionService } from './ReportSubmissionService';
 import { AndroidBleRadioPort } from './AndroidBleRadioPort';
 import { DeviceBackendAuth } from './DeviceBackendAuth';
+import { DevicePresenceService } from './DevicePresenceService';
 
 export type MobileMeshMode = 'MOCK_IN_PROCESS' | 'DEV_EMULATOR_MESH' | 'NATIVE_BLE';
 
@@ -126,7 +127,10 @@ export function createMobileServices(): MobileServices {
   let shutdownTransport: (() => void) | undefined;
   let initialized = false;
   let backendSyncTimer: ReturnType<typeof setInterval> | undefined;
+  let presenceTimer: ReturnType<typeof setInterval> | undefined;
   let backendSyncInFlight: Promise<SyncBatchResponse> | undefined;
+  let presenceService: DevicePresenceService | undefined;
+  let lastPresenceEnvelopeAt = 0;
   let backendGatewayState: MobileMeshActivity['gatewayState'] = 'NOT_CONNECTED';
   let demoOffline = false;
 
@@ -138,6 +142,40 @@ export function createMobileServices(): MobileServices {
   const stopBackendSync = () => {
     if (backendSyncTimer) clearInterval(backendSyncTimer);
     backendSyncTimer = undefined;
+  };
+
+  const publishPresenceToMesh = async (): Promise<void> => {
+    if (!mesh || !presenceService) return;
+    await presenceService.refreshLocation();
+    const activity = await service.getMeshActivity();
+    const telemetry = presenceService.snapshot(activity);
+    const now = Date.now();
+    const messageId = randomUUID();
+    await mesh.sendMeshMessage({
+      messageId,
+      messageType: 'NETWORK_STATUS',
+      priority: 'LOW',
+      createdAt: now,
+      expiresAt: now + 30 * 60_000,
+      hopCount: 0,
+      maxHops: 5,
+      senderPseudonym: `MOBILE-${nodeId}`,
+      destinationType: 'GATEWAY',
+      payload: telemetry,
+    });
+    lastPresenceEnvelopeAt = now;
+  };
+
+  const startPresenceSharing = () => {
+    if (presenceTimer) return;
+    presenceTimer = setInterval(() => {
+      void publishPresenceToMesh().catch((error: unknown) => {
+        console.info('Device presence remains local until the mesh is available.', error);
+      });
+    }, 2 * 60_000);
+    void publishPresenceToMesh().catch((error: unknown) => {
+      console.info('Initial device presence publication deferred.', error);
+    });
   };
 
   let service!: MobileServices;
@@ -189,6 +227,7 @@ export function createMobileServices(): MobileServices {
       if (initialized) return;
       demoOffline = (await asyncStorageAdapter.getItem(DEMO_OFFLINE_KEY)) === 'true';
       nodeId = await getOrCreateDevNodeId(asyncStorageAdapter, randomUUID);
+      presenceService = new DevicePresenceService(nodeId, mode);
       const persistentQueue = new MessageQueue(
         new KeyValueMessageQueueStorage(asyncStorageAdapter, '@resqnet/mobile-mesh-queue/v1'),
       );
@@ -288,6 +327,7 @@ export function createMobileServices(): MobileServices {
         createId: randomUUID,
       });
       initialized = true;
+      startPresenceSharing();
       startBackendSync();
       notify();
     },
@@ -383,6 +423,8 @@ export function createMobileServices(): MobileServices {
 
     shutdown(): void {
       stopBackendSync();
+      if (presenceTimer) clearInterval(presenceTimer);
+      presenceTimer = undefined;
       shutdownTransport?.();
     },
 
@@ -404,7 +446,15 @@ export function createMobileServices(): MobileServices {
         throw new Error('Demo offline mode is on. Reports remain saved and nearby sharing stays active.');
       }
       if (!backendSyncInFlight) {
-        backendSyncInFlight = submissions.syncWithGateway(backendBaseUrl)
+        await presenceService?.refreshLocation();
+        // Keep an offline-carriable capsule reasonably fresh without growing
+        // the queue on every four-second backend poll.
+        if (Date.now() - lastPresenceEnvelopeAt > 2 * 60_000) {
+          await publishPresenceToMesh();
+        }
+        const activity = await service.getMeshActivity();
+        const telemetry = presenceService?.snapshot(activity);
+        backendSyncInFlight = submissions.syncWithGateway(backendBaseUrl, telemetry)
           .then((response) => {
             backendGatewayState = 'ACKNOWLEDGED';
             return response;

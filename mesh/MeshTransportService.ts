@@ -1,5 +1,6 @@
 import type {
   MeshEnvelope,
+  DevicePresenceTelemetry,
   NetworkHealthStatus,
   SyncBatchRequest,
   SyncBatchResponse,
@@ -22,7 +23,10 @@ export interface MeshTransportService {
   getQueuedMessages(): Promise<MeshEnvelope<unknown>[]>;
   getNetworkHealth(): NetworkHealthStatus;
   onMessageReceived(callback: (envelope: MeshEnvelope<unknown>) => void): () => void;
-  syncWithGateway(gatewayUrl: string): Promise<SyncBatchResponse>;
+  syncWithGateway(
+    gatewayUrl: string,
+    deviceTelemetry?: DevicePresenceTelemetry,
+  ): Promise<SyncBatchResponse>;
 }
 
 export interface GatewayClient {

@@ -24,9 +24,9 @@ class ApiService {
   // In-memory reactive state (always available as fallback & immediate cache)
   private cases: DisasterCase[] = [...INITIAL_CASES];
   private matches: MatchCandidate[] = [...INITIAL_MATCHES];
-  private zones: DisasterZone[] = [...INITIAL_ZONES];
-  private facilities: FacilityLocation[] = [...INITIAL_FACILITIES];
-  private meshNodes: MeshNodeStatus[] = [...INITIAL_MESH_NODES];
+  private zones: DisasterZone[] = [];
+  private facilities: FacilityLocation[] = [];
+  private meshNodes: MeshNodeStatus[] = [];
   private auditLogs: VerificationAuditEntry[] = [...INITIAL_AUDIT_LOGS];
   private listeners: Set<Listener> = new Set();
 
@@ -53,6 +53,9 @@ class ApiService {
       this.cases = [];
       this.matches = [];
       this.auditLogs = [];
+      this.zones = [];
+      this.facilities = [];
+      this.meshNodes = [];
     } else {
       this.resetMockData(false);
     }
@@ -430,9 +433,9 @@ class ApiService {
         const res = await this.authFetch('/telemetry/zones');
         if (res.ok) {
           const json = await res.json();
-          if (json.zones?.length) {
+          if (Array.isArray(json.zones)) {
             this.zones = json.zones;
-            return json.zones;
+            return this.zones;
           }
         }
       } catch { /* Fallback */ }
@@ -446,9 +449,9 @@ class ApiService {
         const res = await this.authFetch('/telemetry/facilities');
         if (res.ok) {
           const json = await res.json();
-          if (json.facilities?.length) {
+          if (Array.isArray(json.facilities)) {
             this.facilities = json.facilities;
-            return json.facilities;
+            return this.facilities;
           }
         }
       } catch { /* Fallback */ }
@@ -462,9 +465,9 @@ class ApiService {
         const res = await this.authFetch('/telemetry/mesh-nodes');
         if (res.ok) {
           const json = await res.json();
-          if (json.nodes?.length) {
+          if (Array.isArray(json.nodes)) {
             this.meshNodes = json.nodes;
-            return json.nodes;
+            return this.meshNodes;
           }
         }
       } catch { /* Fallback */ }
@@ -492,13 +495,13 @@ class ApiService {
         const res = await this.authFetch('/telemetry/phone-clusters');
         if (res.ok) {
           const json = await res.json();
-          if (json.clusters?.length) {
+          if (Array.isArray(json.clusters)) {
             return json.clusters;
           }
         }
       } catch { /* Fallback */ }
     }
-    return INITIAL_PHONE_CLUSTERS;
+    return this.isLiveBackend ? [] : INITIAL_PHONE_CLUSTERS;
   }
 
   public resetMockData(shouldNotify: boolean = true) {
