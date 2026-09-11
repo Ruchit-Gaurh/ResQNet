@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Alert } from 'react-native';
+import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import * as Location from 'expo-location';
 
 import { Disclosure } from '../components/Disclosure';
 import { FormField } from '../components/FormField';
@@ -8,7 +9,8 @@ import { PhotoField } from '../components/PhotoField';
 import { Screen } from '../components/Screen';
 import { SubmitButton } from '../components/SubmitButton';
 import type { ReportSubmissionService } from '../services/ReportSubmissionService';
-import { colors } from '../theme';
+import type { GeoLocation } from '../../../shared/types/index';
+import { colors, radii, spacing, typography } from '../theme';
 
 interface MissingReportScreenProps {
   submissions: ReportSubmissionService;
@@ -27,13 +29,37 @@ export function MissingReportScreen({ submissions, onBack, onSaved }: MissingRep
   const [photoUri, setPhotoUri] = useState<string>();
   const [clothing, setClothing] = useState('');
   const [zone, setZone] = useState('');
+  const [lastKnownLocation, setLastKnownLocation] = useState<GeoLocation>();
+  const [locating, setLocating] = useState(false);
   const [details, setDetails] = useState('');
   const [showMore, setShowMore] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const hasUnsavedChanges = [name, age, photoUri, clothing, zone, details].some((value) =>
+  const hasUnsavedChanges = Boolean(lastKnownLocation) || [name, age, photoUri, clothing, zone, details].some((value) =>
     Boolean(value?.trim()),
   );
+
+  async function captureLastSeenLocation(): Promise<void> {
+    setLocating(true);
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Location not available', 'You can still enter a zone or landmark manually.');
+        return;
+      }
+      const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      setLastKnownLocation({
+        lat: Math.round(position.coords.latitude * 100_000) / 100_000,
+        lng: Math.round(position.coords.longitude * 100_000) / 100_000,
+        accuracyMeters: position.coords.accuracy ?? undefined,
+        zone: zone.trim() || undefined,
+      });
+    } catch {
+      Alert.alert('Could not get location', 'Enter a zone or nearby landmark instead. Your report can still be saved.');
+    } finally {
+      setLocating(false);
+    }
+  }
 
   async function submit(): Promise<void> {
     if (![name, age, photoUri, clothing, zone, details].some((value) => Boolean(value?.trim()))) {
@@ -48,6 +74,7 @@ export function MissingReportScreen({ submissions, onBack, onSaved }: MissingRep
         photoUri,
         clothing,
         zone,
+        lastKnownLocation,
         details,
       });
       const message = result.deliveryState === 'RELAYING'
@@ -96,6 +123,22 @@ export function MissingReportScreen({ submissions, onBack, onSaved }: MissingRep
           value={zone}
           onChangeText={setZone}
         />
+        <TouchableOpacity
+          accessibilityRole="button"
+          disabled={locating}
+          onPress={() => void captureLastSeenLocation()}
+          style={styles.locationButton}
+        >
+          <Text style={styles.locationButtonText}>{locating ? 'Getting location…' : 'Use this phone’s current location'}</Text>
+        </TouchableOpacity>
+        <Text style={styles.locationHelp}>Only use this if the person was last seen where you are now.</Text>
+        {lastKnownLocation && (
+          <View style={styles.locationSaved}>
+            <Text style={styles.locationSavedText}>
+              Location saved: {lastKnownLocation.lat.toFixed(5)}, {lastKnownLocation.lng.toFixed(5)}
+            </Text>
+          </View>
+        )}
       </FormSection>
 
       <Disclosure
@@ -122,3 +165,32 @@ export function MissingReportScreen({ submissions, onBack, onSaved }: MissingRep
     </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  locationButton: {
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+  },
+  locationButtonText: {
+    color: colors.primary,
+    ...typography.bodyStrong,
+  },
+  locationHelp: {
+    color: colors.muted,
+    ...typography.caption,
+  },
+  locationSaved: {
+    backgroundColor: colors.safeTint,
+    borderRadius: radii.sm,
+    padding: spacing.sm,
+  },
+  locationSavedText: {
+    color: colors.safe,
+    ...typography.caption,
+  },
+});

@@ -21,6 +21,7 @@ export interface MissingReportInput {
   photoUri?: string;
   clothing?: string;
   zone?: string;
+  lastKnownLocation?: GeoLocation;
   details?: string;
 }
 
@@ -106,7 +107,7 @@ export class ReportSubmissionService {
         identifyingMarks: clean(input.details),
         photoUrl: clean(input.photoUri),
       },
-      lastKnownLocation: clean(input.zone) ? makeZoneLocation(input.zone ?? '') : undefined,
+      lastKnownLocation: input.lastKnownLocation ?? (clean(input.zone) ? makeZoneLocation(input.zone ?? '') : undefined),
       source: 'FAMILY',
       sourceTrustScore: 0,
       verificationState: 'UNVERIFIED',
