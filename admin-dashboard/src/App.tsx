@@ -12,6 +12,7 @@ import { DuplicateConsolidation } from './pages/DuplicateConsolidation';
 import { DisasterMapPage } from './pages/DisasterMapPage';
 import { NetworkStatusPage } from './pages/NetworkStatusPage';
 import { GoldenDemoPage } from './pages/GoldenDemoPage';
+import { AdminLoginScreen } from './components/auth/AdminLoginScreen';
 
 export function App() {
   const [currentTab, setCurrentTab] = useState<NavTab>('map');
@@ -22,36 +23,52 @@ export function App() {
   const [meshNodes, setMeshNodes] = useState<MeshNodeStatus[]>([]);
   const [auditLogs, setAuditLogs] = useState<VerificationAuditEntry[]>([]);
   const [phoneClusters, setPhoneClusters] = useState<PhoneMeshCluster[]>([]);
-  const [selectedCaseId, setSelectedCaseId] = useState<string>('CASE-10291');
+  const [selectedCaseId, setSelectedCaseId] = useState<string>('');
+  const [authenticated, setAuthenticated] = useState(
+    !apiService.isLive() || apiService.isAdminAuthenticated()
+  );
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date>();
+  const [loadError, setLoadError] = useState<string>();
 
   const loadData = async () => {
-    const [c, m, z, f, n, a, p] = await Promise.all([
-      apiService.getCases(),
-      apiService.getAllMatches(),
-      apiService.getZones(),
-      apiService.getFacilities(),
-      apiService.getMeshNodes(),
-      apiService.getAuditLogs(),
-      apiService.getPhoneClusters()
-    ]);
-    setCases(c);
-    setMatches(m);
-    setZones(z);
-    setFacilities(f);
-    setMeshNodes(n);
-    setAuditLogs(a);
-    setPhoneClusters(p);
-    if (c.length > 0 && !selectedCaseId) {
-      setSelectedCaseId(c[0].caseId);
+    try {
+      const [c, m, z, f, n, a, p] = await Promise.all([
+        apiService.getCases(),
+        apiService.getAllMatches(),
+        apiService.getZones(),
+        apiService.getFacilities(),
+        apiService.getMeshNodes(),
+        apiService.getAuditLogs(),
+        apiService.getPhoneClusters()
+      ]);
+      setCases(c);
+      setMatches(m);
+      setZones(z);
+      setFacilities(f);
+      setMeshNodes(n);
+      setAuditLogs(a);
+      setPhoneClusters(p);
+      setSelectedCaseId((current) => current || c[0]?.caseId || '');
+      setLastUpdatedAt(new Date());
+      setLoadError(undefined);
+    } catch (cause) {
+      setLoadError(cause instanceof Error ? cause.message : 'Live data refresh failed.');
     }
   };
 
   useEffect(() => {
-    loadData();
-    return apiService.subscribe(() => {
-      loadData();
+    const unsubscribe = apiService.subscribe(() => {
+      setAuthenticated(!apiService.isLive() || apiService.isAdminAuthenticated());
     });
-  }, []);
+    if (!authenticated) return unsubscribe;
+
+    void loadData();
+    const pollingTimer = window.setInterval(() => void loadData(), 5_000);
+    return () => {
+      window.clearInterval(pollingTimer);
+      unsubscribe();
+    };
+  }, [authenticated]);
 
   const handleVerify = async (
     matchId: string,
@@ -75,10 +92,27 @@ export function App() {
 
   const pendingMatchesCount = matches.filter((m) => m.status === 'PENDING_REVIEW').length;
 
+  if (apiService.isLive() && !authenticated) {
+    return (
+      <AdminLoginScreen
+        onAuthenticated={() => setAuthenticated(true)}
+        onUseDemo={() => {
+          apiService.setMode(false);
+          setAuthenticated(true);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#f1f5f9] text-slate-900 flex flex-col selection:bg-blue-600 selection:text-white antialiased">
       {/* 1. macOS Command Window Header */}
-      <Navbar onRefresh={loadData} />
+      <Navbar
+        onRefresh={loadData}
+        onLogout={() => apiService.logoutAdmin()}
+        lastUpdatedAt={lastUpdatedAt}
+        loadError={loadError}
+      />
 
       <main className="flex-1 p-3 md:p-4 max-w-[1780px] w-full mx-auto space-y-3">
         {/* 2. Top Executive Telemetry Banner (3 Cards: Severity, Decision, Key Biomarkers) */}

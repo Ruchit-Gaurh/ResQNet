@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Radio, RefreshCw, Bell, User, Server, Wifi, AlertTriangle, ShieldCheck, Download, Share2, Bookmark, MoreVertical, Maximize2 } from 'lucide-react';
+import { RefreshCw, Server, Wifi, Download, Share2, MoreVertical, LogOut } from 'lucide-react';
 import { apiService } from '../../services/api';
 
 interface NavbarProps {
-  onRefresh?: () => void;
+  onRefresh?: () => void | Promise<void>;
+  onLogout?: () => void;
+  lastUpdatedAt?: Date;
+  loadError?: string;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ onRefresh }) => {
+export const Navbar: React.FC<NavbarProps> = ({ onRefresh, onLogout, lastUpdatedAt, loadError }) => {
   const [isLive, setIsLive] = useState(apiService.isLive());
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -38,7 +41,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onRefresh }) => {
   const handleRefresh = async () => {
     setIsRefreshing(true);
     await checkHealth();
-    if (onRefresh) onRefresh();
+    if (onRefresh) await onRefresh();
     setTimeout(() => setIsRefreshing(false), 500);
   };
 
@@ -90,15 +93,22 @@ export const Navbar: React.FC<NavbarProps> = ({ onRefresh }) => {
             {!isLive
               ? 'Mock Engine'
               : backendOnline
-              ? 'Live API :4000 (Connected)'
-              : 'Live API :4000 (Connecting...)'}
+              ? 'Render API connected'
+              : 'Render API connecting…'}
           </span>
         </button>
 
-        {/* Mesh Status */}
-        <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-800/80 border border-slate-700 text-slate-300 text-[11px]">
-          <Wifi size={12} className="text-emerald-400" />
-          <span>BLE P2P: <strong>18 Relays</strong></span>
+        {/* Live refresh status; does not claim a fabricated BLE count. */}
+        <div
+          className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded border text-[11px] ${
+            loadError
+              ? 'bg-red-950/60 border-red-500/50 text-red-300'
+              : 'bg-slate-800/80 border-slate-700 text-slate-300'
+          }`}
+          title={loadError || `Backend: ${apiService.getBackendOrigin()}`}
+        >
+          <Wifi size={12} className={loadError ? 'text-red-400' : 'text-emerald-400'} />
+          <span>{loadError ? 'Refresh failed' : lastUpdatedAt ? `Updated ${lastUpdatedAt.toLocaleTimeString()}` : 'Loading live data…'}</span>
         </div>
 
         {/* Refresh */}
@@ -121,6 +131,16 @@ export const Navbar: React.FC<NavbarProps> = ({ onRefresh }) => {
         <button className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800 transition-colors">
           <MoreVertical size={14} />
         </button>
+
+        {isLive && onLogout && (
+          <button
+            onClick={onLogout}
+            className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800 transition-colors"
+            title="End responder session"
+          >
+            <LogOut size={14} />
+          </button>
+        )}
       </div>
     </header>
   );

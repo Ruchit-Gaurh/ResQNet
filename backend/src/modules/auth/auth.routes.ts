@@ -1,17 +1,29 @@
 import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
+import { timingSafeEqual } from 'crypto';
 import { config } from '../../config';
 
 export const authRouter = Router();
 
 const VALID_ROLES = ['FAMILY', 'PUBLIC', 'VOLUNTEER', 'HOSPITAL', 'RELIEF_CAMP', 'RESPONDER_ADMIN'];
 const DEVICE_TOKEN_TTL_SECONDS = 24 * 60 * 60;
+const ADMIN_TOKEN_TTL_SECONDS = 8 * 60 * 60;
 const deviceTokenRequestSchema = z.object({
   deviceId: z.string().trim().regex(/^NODE-[A-F0-9]{8}$/, {
     message: 'deviceId must use the ResQNet NODE-XXXXXXXX format',
   }),
 }).strict();
+const adminTokenRequestSchema = z.object({
+  accessKey: z.string().min(16).max(512),
+}).strict();
+
+function secretsMatch(supplied: string, expected: string): boolean {
+  const suppliedBytes = Buffer.from(supplied);
+  const expectedBytes = Buffer.from(expected);
+  return suppliedBytes.length === expectedBytes.length
+    && timingSafeEqual(suppliedBytes, expectedBytes);
+}
 
 /**
  * Production-safe, least-privilege authentication for an installed mobile node.
@@ -47,6 +59,42 @@ authRouter.post('/device', (req, res) => {
     role,
     userId,
     expiresInSeconds: DEVICE_TOKEN_TTL_SECONDS,
+  });
+});
+
+/**
+ * Responder dashboard sign-in. The access key is configured only on the
+ * backend and exchanged for a short-lived RESPONDER_ADMIN JWT. No JWT signing
+ * secret or permanent admin credential is bundled into the dashboard build.
+ */
+authRouter.post('/admin', (req, res) => {
+  const parsed = adminTokenRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: 'Invalid administrator sign-in request.' });
+  }
+  if (!config.admin.accessKey) {
+    return res.status(503).json({
+      success: false,
+      error: 'Administrator sign-in is not configured on this deployment.',
+    });
+  }
+  if (!secretsMatch(parsed.data.accessKey, config.admin.accessKey)) {
+    return res.status(401).json({ success: false, error: 'Invalid administrator access key.' });
+  }
+
+  const userId = 'admin-dashboard';
+  const role = 'RESPONDER_ADMIN';
+  const token = jwt.sign(
+    { userId, role, pseudonym: 'AUTHORIZED-RESPONDER' },
+    config.jwt.secret,
+    { expiresIn: ADMIN_TOKEN_TTL_SECONDS }
+  );
+  return res.json({
+    success: true,
+    token,
+    role,
+    userId,
+    expiresInSeconds: ADMIN_TOKEN_TTL_SECONDS,
   });
 });
 

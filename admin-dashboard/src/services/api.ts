@@ -3,10 +3,18 @@ import { INITIAL_CASES, INITIAL_MATCHES, INITIAL_ZONES, INITIAL_FACILITIES, INIT
 
 type Listener = () => void;
 
+const DEFAULT_BACKEND_ORIGIN = 'https://resqnet-backend-2gof.onrender.com';
+const ADMIN_TOKEN_STORAGE_KEY = 'RESQNET_ADMIN_TOKEN';
+
+function normalizedBackendOrigin(): string {
+  const configured = import.meta.env.VITE_API_BASE_URL?.trim() || DEFAULT_BACKEND_ORIGIN;
+  return configured.replace(/\/api\/v1\/?$/, '').replace(/\/$/, '');
+}
+
 class ApiService {
   private isLiveBackend: boolean = true;
-  private backendBaseUrl: string = '/api/v1';
-  private directBackendUrl: string = 'http://localhost:4000/api/v1';
+  private readonly backendOrigin = normalizedBackendOrigin();
+  private readonly backendBaseUrl = `${this.backendOrigin}/api/v1`;
   private authToken: string | null = null;
 
   // In-memory reactive state (always available as fallback & immediate cache)
@@ -23,6 +31,12 @@ class ApiService {
       const stored = localStorage.getItem('RESQNET_USE_LIVE_BACKEND');
       // Default to live backend enabled
       this.isLiveBackend = stored !== null ? stored === 'true' : true;
+      this.authToken = sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY);
+      if (this.isLiveBackend) {
+        this.cases = [];
+        this.matches = [];
+        this.auditLogs = [];
+      }
     }
   }
 
@@ -31,11 +45,26 @@ class ApiService {
     if (typeof window !== 'undefined') {
       localStorage.setItem('RESQNET_USE_LIVE_BACKEND', useLive ? 'true' : 'false');
     }
+    if (useLive) {
+      this.cases = [];
+      this.matches = [];
+      this.auditLogs = [];
+    } else {
+      this.resetMockData(false);
+    }
     this.notify();
   }
 
   public isLive(): boolean {
     return this.isLiveBackend;
+  }
+
+  public getBackendOrigin(): string {
+    return this.backendOrigin;
+  }
+
+  public isAdminAuthenticated(): boolean {
+    return Boolean(this.authToken);
   }
 
   public subscribe(listener: Listener): () => void {
@@ -47,106 +76,88 @@ class ApiService {
     this.listeners.forEach((l) => l());
   }
 
-  // --- Auth Token Management ---
+  // --- Production responder authentication ---
 
-  private async getAuthToken(): Promise<string | null> {
-    if (this.authToken) return this.authToken;
-    try {
-      // First try proxied /api/v1/auth/token, then fallback to direct port 4000
-      let res: Response;
-      try {
-        res = await fetch(`${this.backendBaseUrl}/auth/token`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ role: 'RESPONDER_ADMIN', userId: 'admin-ruchit' })
-        });
-      } catch {
-        res = await fetch(`${this.directBackendUrl}/auth/token`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ role: 'RESPONDER_ADMIN', userId: 'admin-ruchit' })
-        });
-      }
-
-      if (res.ok) {
-        const json = await res.json();
-        this.authToken = json.token;
-        return this.authToken;
-      }
-    } catch (err) {
-      console.warn('Unable to get auth token from backend:', err);
+  public async authenticateAdmin(accessKey: string): Promise<void> {
+    const response = await fetch(`${this.backendBaseUrl}/auth/admin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessKey }),
+    });
+    const payload = await response.json().catch(() => ({})) as { token?: string; error?: string };
+    if (!response.ok || !payload.token) {
+      throw new Error(payload.error || `Administrator sign-in failed with HTTP ${response.status}.`);
     }
-    return null;
+    this.authToken = payload.token;
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, payload.token);
+    }
+    this.notify();
+  }
+
+  public logoutAdmin(): void {
+    this.clearAdminSession();
+    this.notify();
+  }
+
+  private clearAdminSession(): void {
+    this.authToken = null;
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+    }
   }
 
   private async authFetch(endpoint: string, options: RequestInit = {}): Promise<Response> {
-    const token = await this.getAuthToken();
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...((options.headers as Record<string, string>) || {})
     };
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
+    if (this.authToken) {
+      headers.Authorization = `Bearer ${this.authToken}`;
     }
-
-    try {
-      return await fetch(`${this.backendBaseUrl}${endpoint}`, {
-        ...options,
-        headers
-      });
-    } catch {
-      // Fallback to direct URL if Vite proxy is bypassed
-      return await fetch(`${this.directBackendUrl}${endpoint}`, {
-        ...options,
-        headers
-      });
+    const response = await fetch(`${this.backendBaseUrl}${endpoint}`, {
+      ...options,
+      headers
+    });
+    if (response.status === 401 || response.status === 403) {
+      this.clearAdminSession();
+      this.notify();
     }
+    return response;
   }
 
   public async checkBackendHealth(): Promise<{ online: boolean; port: number; service?: string }> {
     try {
-      const res = await fetch('/health');
+      const res = await fetch(`${this.backendOrigin}/health`);
       if (res.ok) {
         const data = await res.json();
-        return { online: true, port: 4000, service: data.service };
+        return { online: true, port: 443, service: data.service };
       }
     } catch {
-      try {
-        const fallbackRes = await fetch('http://localhost:4000/health');
-        if (fallbackRes.ok) {
-          const data = await fallbackRes.json();
-          return { online: true, port: 4000, service: data.service };
-        }
-      } catch {
-        return { online: false, port: 4000 };
-      }
+      return { online: false, port: 443 };
     }
-    return { online: false, port: 4000 };
+    return { online: false, port: 443 };
   }
 
   // --- Case Endpoints ---
 
   public async getCases(filters?: { type?: string; status?: string; zone?: string }): Promise<DisasterCase[]> {
     if (this.isLiveBackend) {
-      try {
-        const params = new URLSearchParams();
-        if (filters?.type) params.set('type', filters.type);
-        if (filters?.status) params.set('status', filters.status);
-        if (filters?.zone) params.set('zone', filters.zone);
+      const params = new URLSearchParams();
+      if (filters?.type) params.set('type', filters.type);
+      if (filters?.status) params.set('status', filters.status);
+      if (filters?.zone) params.set('zone', filters.zone);
 
-        const url = `/cases${params.toString() ? `?${params.toString()}` : ''}`;
-        const res = await this.authFetch(url);
-        if (res.ok) {
-          const json = await res.json();
-          const remoteCases = json.cases || json;
-          if (Array.isArray(remoteCases)) {
-            this.cases = remoteCases;
-            return remoteCases;
-          }
-        }
-      } catch (err) {
-        console.warn('Live backend unreachable, falling back to local state', err);
+      const url = `/cases${params.toString() ? `?${params.toString()}` : ''}`;
+      const res = await this.authFetch(url);
+      if (!res.ok) throw new Error(`Live cases request failed with HTTP ${res.status}.`);
+      const json = await res.json();
+      const remoteCases = json.cases || json;
+      if (Array.isArray(remoteCases)) {
+        this.cases = remoteCases;
+        return remoteCases;
       }
+      throw new Error('Live cases response was not a case list.');
     }
 
     let result = [...this.cases];
@@ -230,19 +241,15 @@ class ApiService {
 
   public async getAllMatches(): Promise<MatchCandidate[]> {
     if (this.isLiveBackend) {
-      try {
-        const res = await this.authFetch('/admin/matches');
-        if (res.ok) {
-          const json = await res.json();
-          const remoteMatches = json.matches || json;
-          if (Array.isArray(remoteMatches)) {
-            this.matches = remoteMatches;
-            return remoteMatches;
-          }
-        }
-      } catch (err) {
-        console.warn('Live backend getAllMatches unreachable, using cache', err);
+      const res = await this.authFetch('/admin/matches');
+      if (!res.ok) throw new Error(`Live matches request failed with HTTP ${res.status}.`);
+      const json = await res.json();
+      const remoteMatches = json.matches || json;
+      if (Array.isArray(remoteMatches)) {
+        this.matches = remoteMatches;
+        return remoteMatches;
       }
+      throw new Error('Live matches response was not a match list.');
     }
     return [...this.matches];
   }
@@ -463,15 +470,14 @@ class ApiService {
 
   public async getAuditLogs(): Promise<VerificationAuditEntry[]> {
     if (this.isLiveBackend) {
-      try {
-        const res = await this.authFetch('/admin/audit-logs');
-        if (res.ok) {
-          const json = await res.json();
-          if (json.logs?.length) {
-            return json.logs;
-          }
-        }
-      } catch { /* Fallback */ }
+      const res = await this.authFetch('/admin/audit-logs');
+      if (!res.ok) throw new Error(`Live audit request failed with HTTP ${res.status}.`);
+      const json = await res.json();
+      if (Array.isArray(json.logs)) {
+        this.auditLogs = json.logs;
+        return json.logs;
+      }
+      throw new Error('Live audit response was not an audit list.');
     }
     return this.auditLogs;
   }
@@ -491,12 +497,12 @@ class ApiService {
     return INITIAL_PHONE_CLUSTERS;
   }
 
-  public resetMockData() {
+  public resetMockData(shouldNotify: boolean = true) {
     this.cases = JSON.parse(JSON.stringify(INITIAL_CASES));
     this.matches = JSON.parse(JSON.stringify(INITIAL_MATCHES));
     this.meshNodes = JSON.parse(JSON.stringify(INITIAL_MESH_NODES));
     this.auditLogs = JSON.parse(JSON.stringify(INITIAL_AUDIT_LOGS));
-    this.notify();
+    if (shouldNotify) this.notify();
   }
 }
 

@@ -70,4 +70,29 @@ describe('Mobile device authentication', () => {
 
     expect(response.status).toBe(400);
   });
+
+  it('exchanges the configured responder access key for an admin token', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/auth/admin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessKey: config.admin.accessKey }),
+    });
+    const body = await response.json() as { token: string; role: string; userId: string };
+
+    expect(response.status).toBe(200);
+    expect(body.role).toBe('RESPONDER_ADMIN');
+    expect(body.userId).toBe('admin-dashboard');
+    const claims = jwt.verify(body.token, config.jwt.secret) as jwt.JwtPayload;
+    expect(claims.role).toBe('RESPONDER_ADMIN');
+  });
+
+  it('rejects an incorrect responder access key', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/auth/admin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessKey: 'incorrect-admin-key-value' }),
+    });
+
+    expect(response.status).toBe(401);
+  });
 });
