@@ -27,10 +27,14 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.location.LocationManager
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelUuid
+import android.os.VibrationEffect
+import android.os.Vibrator
 import androidx.core.content.ContextCompat
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
@@ -99,6 +103,9 @@ class ResQNetBleModule : Module() {
   private var ephemeralSeed = ""
   private var rotationMs = 15 * 60 * 1000L
   private var registeredReceiver = false
+  private var emergencyTone: ToneGenerator? = null
+  private var emergencyToneRunnable: Runnable? = null
+  private var originalAlarmVolume: Int? = null
 
   private val context: Context
     get() = requireNotNull(appContext.reactContext) { "React context is unavailable." }
@@ -135,15 +142,66 @@ class ResQNetBleModule : Module() {
         promise: Promise ->
       writeFrame(peerId, UUID.fromString(characteristicUuid), frame, promise)
     }
+    AsyncFunction("playEmergencyAlert") { playEmergencyAlert() }
+    AsyncFunction("stopEmergencyAlert") { stopEmergencyAlert() }
     AsyncFunction("stop") { stopAll() }
 
     OnCreate { registerBluetoothReceiver() }
     OnActivityEntersBackground { pauseDiscovery() }
     OnActivityEntersForeground { resumeDiscovery() }
     OnDestroy {
+      stopEmergencyAlert()
       stopAll()
       unregisterBluetoothReceiver()
     }
+  }
+
+  private fun playEmergencyAlert() {
+    stopEmergencyAlert()
+    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+    if (audioManager != null) {
+      originalAlarmVolume = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
+      audioManager.setStreamVolume(
+        AudioManager.STREAM_ALARM,
+        audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM),
+        0,
+      )
+    }
+    val tone = ToneGenerator(AudioManager.STREAM_ALARM, 100)
+    emergencyTone = tone
+    val runnable = object : Runnable {
+      override fun run() {
+        if (emergencyTone !== tone) return
+        tone.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 420)
+        mainHandler.postDelayed(this, 700)
+      }
+    }
+    emergencyToneRunnable = runnable
+    mainHandler.post(runnable)
+
+    val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 450, 250, 450, 250, 900), 0))
+    } else {
+      @Suppress("DEPRECATION")
+      vibrator?.vibrate(longArrayOf(0, 450, 250, 450, 250, 900), 0)
+    }
+  }
+
+  private fun stopEmergencyAlert() {
+    emergencyToneRunnable?.let(mainHandler::removeCallbacks)
+    emergencyToneRunnable = null
+    emergencyTone?.stopTone()
+    emergencyTone?.release()
+    emergencyTone = null
+    val savedVolume = originalAlarmVolume
+    originalAlarmVolume = null
+    if (savedVolume != null) {
+      val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+      audioManager?.setStreamVolume(AudioManager.STREAM_ALARM, savedVolume, 0)
+    }
+    val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+    vibrator?.cancel()
   }
 
   private fun getStatus(): Map<String, Any> {

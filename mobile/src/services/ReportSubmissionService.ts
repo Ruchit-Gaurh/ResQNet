@@ -54,8 +54,29 @@ export interface SightingInput {
   notes?: string;
 }
 
+export interface EmergencyHelpRequest {
+  requestId: string;
+  requesterName?: string;
+  note?: string;
+  location: GeoLocation;
+  locationObservedAt: number;
+  locationSource: 'CURRENT' | 'RECENT_LAST_KNOWN';
+  timestamp: string;
+  consentToShareLocation: true;
+  status: 'REQUESTING_HELP';
+}
+
+export interface EmergencyHelpInput {
+  requesterName?: string;
+  note?: string;
+  location: GeoLocation;
+  locationObservedAt: number;
+  locationSource?: EmergencyHelpRequest['locationSource'];
+}
+
 export interface SubmissionResult {
   messageId: string;
+  referenceId?: string;
   deliveryState: DeliveryState;
   transportError?: string;
 }
@@ -179,6 +200,22 @@ export class ReportSubmissionService {
       verificationState: 'UNVERIFIED',
     };
     return this.submitEnvelope('SIGHTING', 'NORMAL', payload, SIGHTING_TTL_MS);
+  }
+
+  async submitEmergencyHelp(input: EmergencyHelpInput): Promise<SubmissionResult> {
+    const payload: EmergencyHelpRequest = {
+      requestId: `HELP-${this.options.createId()}`,
+      requesterName: clean(input.requesterName),
+      note: clean(input.note),
+      location: input.location,
+      locationObservedAt: input.locationObservedAt,
+      locationSource: input.locationSource ?? 'CURRENT',
+      timestamp: new Date(this.now()).toISOString(),
+      consentToShareLocation: true,
+      status: 'REQUESTING_HELP',
+    };
+    const result = await this.submitEnvelope('EMERGENCY', 'CRITICAL', payload, DEFAULT_REPORT_TTL_MS);
+    return { ...result, referenceId: payload.requestId };
   }
 
   async syncWithGateway(

@@ -14,7 +14,7 @@ function idFactory(): () => string {
   return () => `00000000-0000-4000-8000-${String(++id).padStart(12, '0')}`;
 }
 
-test('missing, found, safe, and sighting submissions persist before transport', async () => {
+test('missing, found, safe, sighting, and emergency help submissions persist before transport', async () => {
   const storage = new InMemoryLocalStorage();
   const localQueue = new LocalQueueService(storage, () => 1_700_000_000_000);
   const network = new MockMeshNetwork();
@@ -30,16 +30,27 @@ test('missing, found, safe, and sighting submissions persist before transport', 
   await submissions.submitFound({ name: '', physicalDescription: 'Blue shirt', zone: 'Camp 7' });
   await submissions.submitSafe({ name: 'Aman', zone: 'School shelter' });
   await submissions.submitSighting({ personDescription: 'Young adult', zone: 'Sector 4' });
+  const helpResult = await submissions.submitEmergencyHelp({
+    requesterName: 'Aman',
+    note: 'Trapped upstairs',
+    location: { lat: 26.9124, lng: 75.7873, accuracyMeters: 18 },
+    locationObservedAt: 1_700_000_000_000,
+  });
 
   const restoredQueue = new LocalQueueService(storage);
   const records = await restoredQueue.getRecords();
-  assert.equal(records.length, 4);
+  assert.equal(records.length, 5);
   assert.deepEqual(
     new Set(records.map((record) => record.envelope.messageType)),
-    new Set(['MISSING_PERSON', 'FOUND_PERSON', 'SAFE_STATUS', 'SIGHTING']),
+    new Set(['MISSING_PERSON', 'FOUND_PERSON', 'SAFE_STATUS', 'SIGHTING', 'EMERGENCY']),
   );
   assert.ok(records.every((record) => record.deliveryState === 'SAVED_LOCALLY'));
   assert.equal((await restoredQueue.getCases()).length, 2);
+  const emergency = records.find((record) => record.envelope.messageType === 'EMERGENCY');
+  assert.equal(emergency?.envelope.priority, 'CRITICAL');
+  assert.equal((emergency?.envelope.payload as { consentToShareLocation?: boolean }).consentToShareLocation, true);
+  assert.equal((emergency?.envelope.payload as { locationSource?: string }).locationSource, 'CURRENT');
+  assert.equal(helpResult.referenceId, (emergency?.envelope.payload as { requestId?: string }).requestId);
 });
 
 test('local save survives a transport error and does not claim delivery', async () => {

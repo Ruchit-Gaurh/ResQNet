@@ -12,6 +12,7 @@ import { syncRouter } from './modules/sync/sync.routes';
 import { verificationRouter } from './modules/verification/verification.routes';
 import { authRouter } from './modules/auth/auth.routes';
 import { telemetryRouter } from './modules/telemetry/telemetry.routes';
+import { rescueRouter } from './modules/rescue/rescue.routes';
 
 const app = express();
 
@@ -39,6 +40,7 @@ app.use('/api/v1/sync', syncRouter);
 app.use('/api/v1/admin', verificationRouter);
 app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/telemetry', telemetryRouter);
+app.use('/api/v1/rescue', rescueRouter);
 
 // ==========================================
 // 404 Handler

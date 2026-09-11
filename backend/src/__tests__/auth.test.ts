@@ -95,4 +95,26 @@ describe('Mobile device authentication', () => {
 
     expect(response.status).toBe(401);
   });
+
+  it('issues a least-privilege volunteer token for the hackathon rescuer login', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/auth/rescuer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'rescue', password: 'rescue' }),
+    });
+    const body = await response.json() as { token: string; role: string };
+    expect(response.status).toBe(200);
+    expect(body.role).toBe('VOLUNTEER');
+    const claims = jwt.verify(body.token, config.jwt.secret) as jwt.JwtPayload;
+    expect(claims.role).toBe('VOLUNTEER');
+  });
+
+  it('rejects incorrect rescuer credentials', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/auth/rescuer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'rescue', password: 'wrong' }),
+    });
+    expect(response.status).toBe(401);
+  });
 });

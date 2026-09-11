@@ -14,6 +14,8 @@ export type AppRoute =
   | 'MISSING'
   | 'FOUND'
   | 'SIGHTING'
+  | 'HELP'
+  | 'RESCUER'
   | 'CASES'
   | 'NETWORK'
   | 'SETTINGS';
@@ -86,6 +88,23 @@ export function HomeScreen({
     <Screen title="ResQNet" subtitle="Disaster response and family coordination">
       <NetworkStatusPill health={health} onPress={() => onNavigate('NETWORK')} />
 
+      <TouchableOpacity
+        accessibilityHint="Share this phone's current location with nearby devices and responders"
+        accessibilityRole="button"
+        activeOpacity={0.82}
+        onPress={() => onNavigate('HELP')}
+        style={styles.helpButton}
+      >
+        <View style={styles.helpMarker}>
+          <Text accessible={false} style={styles.helpMarkerText}>SOS</Text>
+        </View>
+        <View style={styles.actionCopy}>
+          <Text style={styles.helpTitle}>I need help</Text>
+          <Text style={styles.helpBody}>Share my location for rescue</Text>
+        </View>
+        <Text accessible={false} style={styles.helpChevron}>›</Text>
+      </TouchableOpacity>
+
       <View style={styles.prompt}>
         <Text accessibilityRole="header" style={styles.promptTitle}>What do you need help with?</Text>
         <Text style={styles.promptBody}>Choose one action. Every report is saved on this phone first.</Text>
@@ -142,6 +161,22 @@ export function HomeScreen({
         <Text accessible={false} style={styles.casesChevron}>›</Text>
       </TouchableOpacity>
 
+      <TouchableOpacity
+        accessibilityHint="Open field directions to a missing person's last reported location"
+        accessibilityRole="button"
+        onPress={() => onNavigate('RESCUER')}
+        style={styles.rescuerButton}
+      >
+        <View style={styles.rescuerMarker}>
+          <Text accessible={false} style={styles.rescuerMarkerText}>↑</Text>
+        </View>
+        <View style={styles.casesCopy}>
+          <Text style={styles.rescuerTitle}>Rescuer navigation</Text>
+          <Text style={styles.rescuerBody}>Field guidance to a last reported location</Text>
+        </View>
+        <Text accessible={false} style={styles.casesChevron}>›</Text>
+      </TouchableOpacity>
+
       <View style={styles.utilityRow}>
         <TouchableOpacity accessibilityRole="button" onPress={() => onNavigate('NETWORK')} style={styles.utilityButton}>
           <Text style={styles.utilityText}>Network status</Text>
@@ -156,9 +191,31 @@ export function HomeScreen({
 
 const styles = StyleSheet.create({
   prompt: {
-    marginTop: spacing.xl,
+    marginTop: spacing.lg,
     marginBottom: spacing.sm,
   },
+  helpButton: {
+    minHeight: 82,
+    borderRadius: radii.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginTop: spacing.md,
+    backgroundColor: colors.danger,
+  },
+  helpMarker: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.16)',
+  },
+  helpMarkerText: { color: colors.onAccent, fontSize: 13, lineHeight: 16, fontWeight: '900' },
+  helpTitle: { color: colors.onAccent, fontSize: 20, lineHeight: 25, fontWeight: '900' },
+  helpBody: { color: colors.onAccent, ...typography.caption, marginTop: 2 },
+  helpChevron: { color: colors.onAccent, fontSize: 30, lineHeight: 34, marginLeft: spacing.xs },
   promptTitle: {
     color: colors.textStrong,
     fontSize: 23,
@@ -247,6 +304,40 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontSize: 28,
     marginLeft: spacing.sm,
+  },
+  rescuerButton: {
+    minHeight: 68,
+    borderRadius: radii.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.infoTint,
+  },
+  rescuerMarker: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.sm,
+    backgroundColor: colors.primary,
+  },
+  rescuerMarkerText: {
+    color: colors.onAccent,
+    fontSize: 26,
+    lineHeight: 29,
+    fontWeight: '800',
+  },
+  rescuerTitle: {
+    color: colors.textStrong,
+    ...typography.bodyStrong,
+  },
+  rescuerBody: {
+    color: colors.muted,
+    ...typography.caption,
+    marginTop: 2,
   },
   utilityRow: {
     flexDirection: 'row',

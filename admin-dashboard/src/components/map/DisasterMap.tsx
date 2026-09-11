@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { MapContainer, TileLayer, Polygon, Polyline, Marker, Popup, Tooltip, useMap } from 'react-leaflet';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { MapContainer, TileLayer, Polygon, Polyline, Marker, Popup, Tooltip, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { DisasterZone, FacilityLocation, MeshNodeStatus, DisasterCase, PhoneMeshCluster } from '../../types';
 import {
@@ -142,6 +142,112 @@ const createDeviceIcon = (node: MeshNodeStatus) => {
     popupAnchor: [0, -15],
   });
 };
+
+const createDeviceClusterIcon = (count: number) => L.divIcon({
+  className: 'resqnet-device-cluster',
+  html: `<div style="width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#23577a;color:#f9fbfc;border:3px solid #f9fbfc;box-shadow:0 4px 14px rgba(15,23,42,.32);font:800 13px system-ui">${count}</div>`,
+  iconSize: [42, 42],
+  iconAnchor: [21, 21],
+});
+
+interface DeviceMarkerGroup {
+  position: [number, number];
+  nodes: MeshNodeStatus[];
+}
+
+function DeviceClusterLayer({ nodes }: { nodes: MeshNodeStatus[] }) {
+  const map = useMap();
+  const [zoom, setZoom] = useState(map.getZoom());
+  useMapEvents({
+    zoomend: () => setZoom(map.getZoom()),
+    moveend: () => setZoom(map.getZoom()),
+  });
+
+  const groups = useMemo<DeviceMarkerGroup[]>(() => {
+    const located = nodes.filter((node) => typeof node.lat === 'number' && typeof node.lng === 'number');
+
+    // At street-level zoom, spread devices sharing the same reported point so
+    // every node remains selectable while preserving the original centre.
+    if (zoom >= 18) {
+      const byCoordinate = new Map<string, MeshNodeStatus[]>();
+      for (const node of located) {
+        const key = `${node.lat?.toFixed(5)},${node.lng?.toFixed(5)}`;
+        byCoordinate.set(key, [...(byCoordinate.get(key) ?? []), node]);
+      }
+      return [...byCoordinate.values()].flatMap((samePoint) => {
+        const anchor = map.project([samePoint[0]!.lat as number, samePoint[0]!.lng as number], zoom);
+        return samePoint.map((node, index) => {
+          if (samePoint.length === 1) return { position: [node.lat as number, node.lng as number], nodes: [node] };
+          const angle = (Math.PI * 2 * index) / samePoint.length;
+          const spread = 30;
+          const offset = L.point(anchor.x + Math.cos(angle) * spread, anchor.y + Math.sin(angle) * spread);
+          const position = map.unproject(offset, zoom);
+          return { position: [position.lat, position.lng], nodes: [node] };
+        });
+      });
+    }
+
+    const radiusPixels = zoom <= 7 ? 90 : zoom <= 11 ? 70 : 52;
+    const clustered: Array<DeviceMarkerGroup & { point: L.Point }> = [];
+    for (const node of located) {
+      const point = map.project([node.lat as number, node.lng as number], zoom);
+      const existing = clustered.find((cluster) => cluster.point.distanceTo(point) <= radiusPixels);
+      if (existing) {
+        existing.nodes.push(node);
+        const count = existing.nodes.length;
+        existing.point = L.point(
+          ((existing.point.x * (count - 1)) + point.x) / count,
+          ((existing.point.y * (count - 1)) + point.y) / count,
+        );
+        const centre = map.unproject(existing.point, zoom);
+        existing.position = [centre.lat, centre.lng];
+      } else {
+        clustered.push({ position: [node.lat as number, node.lng as number], nodes: [node], point });
+      }
+    }
+    return clustered;
+  }, [map, nodes, zoom]);
+
+  return (
+    <>
+      {groups.map((group) => {
+        if (group.nodes.length > 1) {
+          const key = group.nodes.map((node) => node.nodeId).sort().join(':');
+          return (
+            <Marker
+              key={key}
+              position={group.position}
+              icon={createDeviceClusterIcon(group.nodes.length)}
+              eventHandlers={{ click: () => map.flyTo(group.position, Math.min(18, zoom + 2), { duration: 0.35 }) }}
+            >
+              <Tooltip direction="top">{group.nodes.length} ResQNet devices. Select to zoom in.</Tooltip>
+            </Marker>
+          );
+        }
+
+        const node = group.nodes[0]!;
+        const directlyOnline = node.connectionState === 'ONLINE_DIRECT';
+        return (
+          <Marker key={node.nodeId} position={group.position} icon={createDeviceIcon(node)}>
+            <Popup>
+              <div className="min-w-[230px] text-xs">
+                <div className="font-bold text-slate-900">{node.name}</div>
+                <div className="font-mono text-[10px] text-slate-500">{node.nodeId}</div>
+                <div className={`mt-2 font-bold ${directlyOnline ? 'text-emerald-700' : 'text-amber-700'}`}>
+                  {directlyOnline ? 'Online directly' : node.connectionState === 'OFFLINE_RELAYED' ? 'Offline · location carried by a nearby phone' : 'Last seen · stale'}
+                </div>
+                <div className="mt-1 text-slate-600">Last seen {new Date(node.lastSeenAt ?? Date.now()).toLocaleString()}</div>
+                {node.relayedByNodeId && <div className="mt-1 text-slate-600">Delivered by <span className="font-mono">{node.relayedByNodeId}</span></div>}
+                <div className="mt-1 text-slate-600">Nearby peers: {node.connectedPeersCount} · Queue: {node.messagesInQueue}</div>
+                {node.accuracyMeters != null && <div className="mt-1 text-slate-500">Reported accuracy ±{Math.round(node.accuracyMeters)} m</div>}
+              </div>
+            </Popup>
+          </Marker>
+        );
+      })}
+    </>
+  );
+}
 
 export const DisasterMap: React.FC<DisasterMapProps> = ({
   zones,
@@ -451,27 +557,7 @@ export const DisasterMap: React.FC<DisasterMapProps> = ({
                 </Polyline>
               ))}
 
-              {meshNodes.map((node) => {
-                if (typeof node.lat !== 'number' || typeof node.lng !== 'number') return null;
-                const directlyOnline = node.connectionState === 'ONLINE_DIRECT';
-                return (
-                  <Marker key={node.nodeId} position={[node.lat, node.lng]} icon={createDeviceIcon(node)}>
-                    <Popup>
-                      <div className="min-w-[230px] text-xs">
-                        <div className="font-bold text-slate-900">{node.name}</div>
-                        <div className="font-mono text-[10px] text-slate-500">{node.nodeId}</div>
-                        <div className={`mt-2 font-bold ${directlyOnline ? 'text-emerald-700' : 'text-amber-700'}`}>
-                          {directlyOnline ? 'Online directly' : node.connectionState === 'OFFLINE_RELAYED' ? 'Offline · location carried by a nearby phone' : 'Last seen · stale'}
-                        </div>
-                        <div className="mt-1 text-slate-600">Last seen {new Date(node.lastSeenAt ?? Date.now()).toLocaleString()}</div>
-                        {node.relayedByNodeId && <div className="mt-1 text-slate-600">Delivered by <span className="font-mono">{node.relayedByNodeId}</span></div>}
-                        <div className="mt-1 text-slate-600">Nearby peers: {node.connectedPeersCount} · Queue: {node.messagesInQueue}</div>
-                        {node.accuracyMeters != null && <div className="mt-1 text-slate-500">Reported accuracy ±{Math.round(node.accuracyMeters)} m</div>}
-                      </div>
-                    </Popup>
-                  </Marker>
-                );
-              })}
+              <DeviceClusterLayer nodes={meshNodes} />
 
               {/* Phone Cluster Markers with Exact Phone Count Badges */}
               {activeClusters.map((cluster) => (

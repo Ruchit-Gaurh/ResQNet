@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 
 import {
   FetchGatewayClient,
+  type MeshSendResult,
   type MeshTransportService,
 } from '../../../mesh/MeshTransportService';
 import {
@@ -22,7 +23,7 @@ import {
   KeyValueMessageQueueStorage,
   MessageQueue,
 } from '../../../mesh/queue/MessageQueue';
-import type { MeshEnvelope, SyncBatchResponse } from '../../../shared/types/index';
+import type { DisasterCase, GeoLocation, MeshEnvelope, SyncBatchResponse } from '../../../shared/types/index';
 import { asyncStorageAdapter } from './AsyncStorageAdapters';
 import { getOrCreateDevNodeId } from './DevNodeIdentity';
 import { LocalQueueService, type ReceivedMeshRecord } from './LocalQueueService';
@@ -30,6 +31,14 @@ import { ReportSubmissionService } from './ReportSubmissionService';
 import { AndroidBleRadioPort } from './AndroidBleRadioPort';
 import { DeviceBackendAuth } from './DeviceBackendAuth';
 import { DevicePresenceService } from './DevicePresenceService';
+import { playNearbyRescuerAlert, stopNearbyRescuerAlert } from './EmergencyAlertService';
+import {
+  isRescueSignalEnvelope,
+  rescueSignalTarget,
+  type HelpRescueStatus,
+  type RescueSignalAction,
+  type RescueSignalPayload,
+} from './RescueSignal';
 
 export type MobileMeshMode = 'MOCK_IN_PROCESS' | 'DEV_EMULATOR_MESH' | 'NATIVE_BLE';
 
@@ -75,6 +84,12 @@ export interface MobileServices {
   syncBackend(): Promise<SyncBatchResponse>;
   retryNativeBle(): Promise<void>;
   sendBleTestEnvelope(): Promise<string>;
+  sendRescueSignal(
+    target: DisasterCase,
+    action: RescueSignalAction,
+    rescuerLocation?: GeoLocation,
+  ): Promise<{ supported: boolean; sendResult?: MeshSendResult }>;
+  getHelpStatus(requestId: string): Promise<HelpRescueStatus | undefined>;
 }
 
 const DEMO_OFFLINE_KEY = '@resqnet/demo-offline/v1';
@@ -107,6 +122,16 @@ function summaryFromRecord(record: ReceivedMeshRecord): string {
   }
   if (typeof payload.personName === 'string') return payload.personName;
   if (typeof payload.personDescription === 'string') return payload.personDescription;
+  if (record.envelope.messageType === 'EMERGENCY') {
+    if (payload.kind === 'RESCUE_SIGNAL') {
+      if (payload.action === 'PERSON_FOUND') return 'Rescue completion signal';
+      if (payload.action === 'RESCUER_NEARBY') return 'Nearby rescuer alert';
+      return 'Rescuer location update';
+    }
+    return typeof payload.requesterName === 'string'
+      ? `${payload.requesterName} needs help`
+      : 'Emergency help request';
+  }
   return record.envelope.messageType.replaceAll('_', ' ');
 }
 
@@ -128,11 +153,14 @@ export function createMobileServices(): MobileServices {
   let initialized = false;
   let backendSyncTimer: ReturnType<typeof setInterval> | undefined;
   let presenceTimer: ReturnType<typeof setInterval> | undefined;
+  let rescueStatusTimer: ReturnType<typeof setInterval> | undefined;
   let backendSyncInFlight: Promise<SyncBatchResponse> | undefined;
   let presenceService: DevicePresenceService | undefined;
+  let deviceAuth: DeviceBackendAuth | undefined;
   let lastPresenceEnvelopeAt = 0;
   let backendGatewayState: MobileMeshActivity['gatewayState'] = 'NOT_CONNECTED';
   let demoOffline = false;
+  let activeAlertRequestId: string | undefined;
 
   const notify = () => {
     for (const subscriber of subscribers) subscriber();
@@ -176,6 +204,58 @@ export function createMobileServices(): MobileServices {
     void publishPresenceToMesh().catch((error: unknown) => {
       console.info('Initial device presence publication deferred.', error);
     });
+  };
+
+  const refreshOwnedRescueStatuses = async (): Promise<void> => {
+    const records = await localQueue.getRecords();
+    for (const record of records) {
+      const payload = record.envelope.payload as Record<string, unknown>;
+      if (record.envelope.messageType === 'EMERGENCY' && payload.status === 'REQUESTING_HELP' && typeof payload.requestId === 'string') {
+        await service.getHelpStatus(payload.requestId);
+      }
+    }
+  };
+
+  const startRescueStatusPolling = () => {
+    if (rescueStatusTimer) return;
+    rescueStatusTimer = setInterval(() => {
+      void refreshOwnedRescueStatuses().catch((error: unknown) => {
+        console.info('Rescue status polling deferred.', error);
+      });
+    }, 5_000);
+  };
+
+  const receiveEnvelope = async (
+    envelope: MeshEnvelope<unknown>,
+    fromNodeId?: string,
+  ): Promise<void> => {
+    await localQueue.saveReceivedEnvelope(envelope, fromNodeId);
+    if (!isRescueSignalEnvelope(envelope)) return;
+    if (
+      envelope.destinationId !== nodeId
+      || envelope.payload.targetSenderPseudonym !== `MOBILE-${nodeId}`
+    ) return;
+
+    const ownsRequest = (await localQueue.getRecords()).some((record) => {
+      if (record.envelope.messageType !== 'EMERGENCY') return false;
+      const payload = record.envelope.payload as Record<string, unknown>;
+      return payload.status === 'REQUESTING_HELP'
+        && payload.requestId === envelope.payload.targetRequestId;
+    });
+    if (!ownsRequest) return;
+
+    if (envelope.payload.action === 'RESCUER_NEARBY') {
+      if (activeAlertRequestId !== envelope.payload.targetRequestId) {
+        activeAlertRequestId = envelope.payload.targetRequestId;
+        await playNearbyRescuerAlert();
+      }
+    } else if (
+      envelope.payload.action === 'PERSON_FOUND'
+      && activeAlertRequestId === envelope.payload.targetRequestId
+    ) {
+      activeAlertRequestId = undefined;
+      await stopNearbyRescuerAlert();
+    }
   };
 
   let service!: MobileServices;
@@ -234,9 +314,9 @@ export function createMobileServices(): MobileServices {
       const persistentDedup = new Deduplicator(
         new KeyValueSeenMessageStore(asyncStorageAdapter, '@resqnet/mobile-mesh-seen/v1'),
       );
-      const deviceAuth = new DeviceBackendAuth(backendBaseUrl, nodeId);
+      deviceAuth = new DeviceBackendAuth(backendBaseUrl, nodeId);
       const gatewayClient = new FetchGatewayClient({
-        getAccessToken: canSyncBackend ? () => deviceAuth.getAccessToken() : undefined,
+        getAccessToken: canSyncBackend ? () => deviceAuth!.getAccessToken() : undefined,
       });
 
       if (mode === 'NATIVE_BLE') {
@@ -261,7 +341,7 @@ export function createMobileServices(): MobileServices {
         });
         nativeMesh.onMessageReceived((envelope) => {
           const fromNodeId = nativeMesh?.getActivity().lastReceived?.fromNodeId;
-          void localQueue.saveReceivedEnvelope(envelope, fromNodeId).catch((error: unknown) => {
+          void receiveEnvelope(envelope, fromNodeId).catch((error: unknown) => {
             console.warn('Could not persist received Bluetooth envelope.', error);
           });
         });
@@ -286,7 +366,7 @@ export function createMobileServices(): MobileServices {
         });
         devMesh.onMessageReceived((envelope) => {
           const fromNodeId = devMesh.getActivity().lastReceived?.fromNodeId;
-          void localQueue.saveReceivedEnvelope(envelope, fromNodeId).catch((error: unknown) => {
+          void receiveEnvelope(envelope, fromNodeId).catch((error: unknown) => {
             console.warn('Could not persist received development mesh envelope.', error);
           });
         });
@@ -316,6 +396,11 @@ export function createMobileServices(): MobileServices {
           gatewayClient: demoGateway,
         });
         mesh = mockMesh;
+        mockMesh.onMessageReceived((envelope) => {
+          void receiveEnvelope(envelope).catch((error: unknown) => {
+            console.warn('Could not persist received mock mesh envelope.', error);
+          });
+        });
         await Promise.all([mockMesh.init(), nodeB.init(), mockGatewayNode.init()]);
         mockNetwork.connect(nodeId, 'MOCK-B');
         mockNetwork.connect('MOCK-B', 'MOCK-C');
@@ -329,6 +414,18 @@ export function createMobileServices(): MobileServices {
       initialized = true;
       startPresenceSharing();
       startBackendSync();
+      startRescueStatusPolling();
+      // Restore an unresolved nearby-rescuer alert after an app restart. The
+      // latest local signal is available offline; online status is also
+      // reconciled through the authenticated requester endpoint.
+      void (async () => {
+        const records = await localQueue.getRecords();
+        for (const record of records) {
+          const payload = record.envelope.payload as Record<string, unknown>;
+          if (record.envelope.messageType !== 'EMERGENCY' || payload.status !== 'REQUESTING_HELP' || typeof payload.requestId !== 'string') continue;
+          await service.getHelpStatus(payload.requestId);
+        }
+      })().catch((error: unknown) => console.info('Rescue alert restoration deferred.', error));
       notify();
     },
 
@@ -425,6 +522,8 @@ export function createMobileServices(): MobileServices {
       stopBackendSync();
       if (presenceTimer) clearInterval(presenceTimer);
       presenceTimer = undefined;
+      if (rescueStatusTimer) clearInterval(rescueStatusTimer);
+      rescueStatusTimer = undefined;
       shutdownTransport?.();
     },
 
@@ -495,6 +594,97 @@ export function createMobileServices(): MobileServices {
       });
       notify();
       return messageId;
+    },
+
+    async sendRescueSignal(target, action, rescuerLocation) {
+      if (!mesh) throw new Error('Mesh transport is not initialized.');
+      const destination = rescueSignalTarget(target);
+      if (!destination) return { supported: false };
+      const createdAt = Date.now();
+      const payload: RescueSignalPayload = {
+        kind: 'RESCUE_SIGNAL',
+        action,
+        targetRequestId: destination.requestId,
+        targetSenderPseudonym: destination.senderPseudonym,
+        rescuerNodeId: nodeId,
+        rescuerLocation,
+        rescuerLocationObservedAt: rescuerLocation ? createdAt : undefined,
+        sentAt: new Date(createdAt).toISOString(),
+      };
+      const sendResult = await mesh.sendMeshMessage({
+        messageId: randomUUID(),
+        messageType: 'EMERGENCY',
+        priority: 'CRITICAL',
+        createdAt,
+        expiresAt: createdAt + 30 * 60_000,
+        hopCount: 0,
+        maxHops: 5,
+        senderPseudonym: `MOBILE-${nodeId}`,
+        // The destination remains explicit for requester-side filtering, while
+        // GATEWAY ensures an internet-connected rescuer can coordinate with a
+        // requester outside Bluetooth range.
+        destinationType: 'GATEWAY',
+        destinationId: destination.nodeId,
+        payload,
+      });
+      return { supported: true, sendResult };
+    },
+
+    async getHelpStatus(requestId) {
+      let localStatus: HelpRescueStatus | undefined;
+      const received = await localQueue.getReceivedRecords();
+      for (const record of received) {
+        if (!isRescueSignalEnvelope(record.envelope)) continue;
+        const payload = record.envelope.payload;
+        if (payload.targetRequestId !== requestId || payload.targetSenderPseudonym !== `MOBILE-${nodeId}`) continue;
+        localStatus = {
+          requestId,
+          status: payload.action === 'PERSON_FOUND'
+            ? 'PERSON_FOUND'
+            : payload.action === 'RESCUER_NEARBY'
+              ? 'RESCUER_NEARBY'
+              : 'RESCUER_ASSIGNED',
+          rescuerNodeId: payload.rescuerNodeId,
+          rescuerLocation: payload.rescuerLocation,
+          rescuerLocationObservedAt: payload.rescuerLocationObservedAt,
+          updatedAt: payload.sentAt,
+        };
+        break;
+      }
+
+      if (!canSyncBackend || demoOffline || !deviceAuth) {
+        if (localStatus?.status === 'RESCUER_NEARBY' && activeAlertRequestId !== requestId) {
+          activeAlertRequestId = requestId;
+          await playNearbyRescuerAlert();
+        } else if (localStatus?.status === 'PERSON_FOUND' && activeAlertRequestId === requestId) {
+          activeAlertRequestId = undefined;
+          await stopNearbyRescuerAlert();
+        }
+        return localStatus;
+      }
+      try {
+        const token = await deviceAuth.getAccessToken();
+        const response = await fetch(
+          `${backendBaseUrl}/api/v1/rescue/help/${encodeURIComponent(requestId)}/status`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+        if (response.ok) {
+          const result = await response.json() as { success?: boolean; status?: HelpRescueStatus };
+          if (result.success && result.status && (!localStatus || result.status.updatedAt >= localStatus.updatedAt)) {
+            localStatus = result.status;
+          }
+        }
+      } catch (error) {
+        console.info('Remote rescue status unavailable; local mesh status retained.', error);
+      }
+      if (localStatus?.status === 'RESCUER_NEARBY' && activeAlertRequestId !== requestId) {
+        activeAlertRequestId = requestId;
+        await playNearbyRescuerAlert();
+      } else if (localStatus?.status === 'PERSON_FOUND' && activeAlertRequestId === requestId) {
+        activeAlertRequestId = undefined;
+        await stopNearbyRescuerAlert();
+      }
+      return localStatus;
     },
   };
 

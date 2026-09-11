@@ -80,7 +80,9 @@ export class MockMeshNetwork {
         const peer = this.requireNode(peerId);
         if (await peer.receiveFromPeer(nextEnvelope)) {
           acceptedCount += 1;
-          pending.push({ nodeId: peerId, envelope: nextEnvelope });
+          const reachedDestination = nextEnvelope.destinationType === 'SPECIFIC_NODE'
+            && nextEnvelope.destinationId === peerId;
+          if (!reachedDestination) pending.push({ nodeId: peerId, envelope: nextEnvelope });
         }
       }
     }
@@ -237,7 +239,9 @@ export class MockMeshTransport implements MeshTransportService {
     deviceTelemetry?: DevicePresenceTelemetry,
   ): Promise<SyncBatchResponse> {
     this.ensureInitialized();
-    const outboundEnvelopes = await this.queue.getAll();
+    const outboundEnvelopes = (await this.queue.getAll()).filter(
+      (item) => item.destinationType !== 'SPECIFIC_NODE',
+    );
     const request: SyncBatchRequest = {
       deviceId: this.nodeId,
       lastSyncTimestamp: this.lastSuccessfulSyncTimestamp ?? 0,
@@ -284,7 +288,9 @@ export class MockMeshTransport implements MeshTransportService {
       return false;
     }
 
-    await this.queue.enqueue(validated);
+    const reachedDestination = validated.destinationType === 'SPECIFIC_NODE'
+      && validated.destinationId === this.nodeId;
+    if (!reachedDestination) await this.queue.enqueue(validated);
     this.queuedMessageCount = await this.queue.size();
     for (const listener of this.listeners) {
       listener({ ...validated });

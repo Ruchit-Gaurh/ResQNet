@@ -23,6 +23,8 @@ export interface ResQNetBleNativeModule {
   connect(peerId: string): Promise<void>;
   disconnect(peerId: string): Promise<void>;
   writeFrame(peerId: string, characteristicUuid: string, frame: number[]): Promise<void>;
+  playEmergencyAlert(): Promise<void>;
+  stopEmergencyAlert(): Promise<void>;
   addListener(eventName: string, callback: (event: Record<string, unknown>) => void): NativeEventSubscription;
 }
 

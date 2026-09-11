@@ -8,10 +8,12 @@ import {
   type MobileMeshActivity,
 } from './src/services/createMobileServices';
 import { FamilyDashboardScreen } from './src/screens/FamilyDashboardScreen';
+import { EmergencyHelpScreen } from './src/screens/EmergencyHelpScreen';
 import { FoundReportScreen } from './src/screens/FoundReportScreen';
 import { type AppRoute, HomeScreen } from './src/screens/HomeScreen';
 import { MissingReportScreen } from './src/screens/MissingReportScreen';
 import { NetworkStatusScreen } from './src/screens/NetworkStatusScreen';
+import { RescuerModeScreen } from './src/screens/RescuerModeScreen';
 import { SafeCheckInScreen } from './src/screens/SafeCheckInScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { SightingReportScreen } from './src/screens/SightingReportScreen';
@@ -114,6 +116,15 @@ function AppContent() {
     setRoute('CASES');
   }, [refreshHealth, services]);
 
+  const onHelpSaved = useCallback(() => {
+    void refreshHealth();
+    if (services.canSyncBackend && !services.isDemoOffline()) {
+      void services.syncBackend().then(refreshHealth).catch((error: unknown) => {
+        console.info('Help request remains local until backend connectivity returns.', error);
+      });
+    }
+  }, [refreshHealth, services]);
+
   const toggleDemoOffline = useCallback(async (enabled: boolean) => {
     if (demoModeBusy) return;
     setDemoModeBusy(true);
@@ -177,6 +188,25 @@ function AppContent() {
       return <SafeCheckInScreen submissions={services.submissions} onBack={() => setRoute('HOME')} onSaved={onSaved} />;
     case 'SIGHTING':
       return <SightingReportScreen submissions={services.submissions} onBack={() => setRoute('HOME')} onSaved={onSaved} />;
+    case 'HELP':
+      return (
+        <EmergencyHelpScreen
+          demoOffline={demoOffline}
+          submissions={services.submissions}
+          loadHelpStatus={(requestId) => services.getHelpStatus(requestId)}
+          onBack={() => setRoute('HOME')}
+          onSaved={onHelpSaved}
+        />
+      );
+    case 'RESCUER':
+      return (
+        <RescuerModeScreen
+          backendBaseUrl={services.backendBaseUrl}
+          localQueue={services.localQueue}
+          onSendRescueSignal={(target, action, rescuerLocation) => services.sendRescueSignal(target, action, rescuerLocation)}
+          onBack={() => setRoute('HOME')}
+        />
+      );
     case 'CASES':
       return (
         <FamilyDashboardScreen

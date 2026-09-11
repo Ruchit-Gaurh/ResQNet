@@ -9,6 +9,7 @@ export const authRouter = Router();
 const VALID_ROLES = ['FAMILY', 'PUBLIC', 'VOLUNTEER', 'HOSPITAL', 'RELIEF_CAMP', 'RESPONDER_ADMIN'];
 const DEVICE_TOKEN_TTL_SECONDS = 24 * 60 * 60;
 const ADMIN_TOKEN_TTL_SECONDS = 8 * 60 * 60;
+const RESCUER_TOKEN_TTL_SECONDS = 8 * 60 * 60;
 const deviceTokenRequestSchema = z.object({
   deviceId: z.string().trim().regex(/^NODE-[A-F0-9]{8}$/, {
     message: 'deviceId must use the ResQNet NODE-XXXXXXXX format',
@@ -16,6 +17,10 @@ const deviceTokenRequestSchema = z.object({
 }).strict();
 const adminTokenRequestSchema = z.object({
   accessKey: z.string().max(512),
+}).strict();
+const rescuerTokenRequestSchema = z.object({
+  username: z.string().trim().max(128),
+  password: z.string().max(128),
 }).strict();
 
 function normalizeAdminAccessKey(value: string): string {
@@ -68,6 +73,36 @@ authRouter.post('/device', (req, res) => {
     role,
     userId,
     expiresInSeconds: DEVICE_TOKEN_TTL_SECONDS,
+  });
+});
+
+/**
+ * Hackathon field-rescuer sign-in. This deliberately issues only the
+ * VOLUNTEER role; it cannot verify matches or access administrator routes.
+ * Replace the demonstration credential with managed responder accounts
+ * before any non-demo deployment.
+ */
+authRouter.post('/rescuer', (req, res) => {
+  const parsed = rescuerTokenRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: 'Invalid rescuer sign-in request.' });
+  }
+  if (!secretsMatch(parsed.data.username, 'rescue') || !secretsMatch(parsed.data.password, 'rescue')) {
+    return res.status(401).json({ success: false, error: 'Invalid rescuer credentials.' });
+  }
+  const userId = `field-rescuer-${Date.now()}`;
+  const role = 'VOLUNTEER';
+  const token = jwt.sign(
+    { userId, role, pseudonym: 'AUTHORIZED-FIELD-RESCUER' },
+    config.jwt.secret,
+    { expiresIn: RESCUER_TOKEN_TTL_SECONDS },
+  );
+  return res.json({
+    success: true,
+    token,
+    role,
+    userId,
+    expiresInSeconds: RESCUER_TOKEN_TTL_SECONDS,
   });
 });
 

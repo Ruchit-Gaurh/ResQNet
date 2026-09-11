@@ -215,7 +215,9 @@ export class DevMeshTransport implements MeshTransportService {
     deviceTelemetry?: DevicePresenceTelemetry,
   ): Promise<SyncBatchResponse> {
     this.ensureInitialized();
-    const outboundEnvelopes = await this.queue.getAll();
+    const outboundEnvelopes = (await this.queue.getAll()).filter(
+      (item) => item.destinationType !== 'SPECIFIC_NODE',
+    );
     const request: SyncBatchRequest = {
       deviceId: this.nodeId,
       lastSyncTimestamp: this.lastSuccessfulSyncTimestamp ?? 0,
@@ -311,8 +313,15 @@ export class DevMeshTransport implements MeshTransportService {
     }
     if (message.kind === 'PEER_RECEIPT') {
       this.activity.peerReceiptCount += 1;
+      const queued = (await this.queue.getAll()).find((item) => item.messageId === message.messageId);
+      const reachedDestination = queued?.destinationType === 'SPECIFIC_NODE'
+        && queued.destinationId === message.fromNodeId;
+      if (reachedDestination) await this.queue.acknowledge(message.messageId);
+      await this.refreshQueueCount();
       this.setLastActivity(
-        `${message.fromNodeId} received ${message.messageId.slice(0, 8)}; waiting for gateway`,
+        reachedDestination
+          ? `Target phone ${message.fromNodeId} received ${message.messageId.slice(0, 8)}`
+          : `${message.fromNodeId} received ${message.messageId.slice(0, 8)}; waiting for gateway`,
       );
       for (const listener of this.peerReceiptListeners) {
         listener(message.messageId, message.fromNodeId);
@@ -324,7 +333,9 @@ export class DevMeshTransport implements MeshTransportService {
     if (isEnvelopeExpired(envelope, this.now()) || envelope.hopCount > envelope.maxHops) return;
     if (!(await this.deduplicator.checkAndMark(envelope.messageId))) return;
 
-    await this.queue.enqueue(envelope);
+    const reachedDestination = envelope.destinationType === 'SPECIFIC_NODE'
+      && envelope.destinationId === this.nodeId;
+    if (!reachedDestination) await this.queue.enqueue(envelope);
     await this.refreshQueueCount();
     this.activity.receivedCount += 1;
     this.activity.lastReceived = {
@@ -345,7 +356,7 @@ export class DevMeshTransport implements MeshTransportService {
       receivedAt: this.now(),
     });
 
-    if (canForwardEnvelope(envelope, this.now())) {
+    if (!reachedDestination && canForwardEnvelope(envelope, this.now())) {
       this.send({ kind: 'ENVELOPE', nodeId: this.nodeId, envelope });
       this.activity.relayedCount += 1;
       this.emitActivity();

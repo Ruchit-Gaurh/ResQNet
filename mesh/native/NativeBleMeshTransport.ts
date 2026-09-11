@@ -260,7 +260,11 @@ export class NativeBleMeshTransport implements MeshTransportService {
     deviceTelemetry?: DevicePresenceTelemetry,
   ): Promise<SyncBatchResponse> {
     this.ensureInitialized();
-    const outboundEnvelopes = await this.queue.getAll();
+    // Peer-addressed control messages must remain in the carry queue until the
+    // intended phone receives them. A backend ACK must not consume them first.
+    const outboundEnvelopes = (await this.queue.getAll()).filter(
+      (item) => item.destinationType !== 'SPECIFIC_NODE',
+    );
     const request: SyncBatchRequest = {
       deviceId: this.nodeId,
       lastSyncTimestamp: this.lastSuccessfulSyncTimestamp ?? 0,
@@ -414,7 +418,14 @@ export class NativeBleMeshTransport implements MeshTransportService {
       }
       case 'RECEIPT': {
         this.peerReceiptCount += 1;
-        this.lastActivity = `Nearby peer received ${packet.messageId}; waiting for gateway ACK.`;
+        const queued = (await this.queue.getAll()).find((item) => item.messageId === packet.messageId);
+        const reachedDestination = queued?.destinationType === 'SPECIFIC_NODE'
+          && queued.destinationId === peerId;
+        if (reachedDestination) await this.queue.acknowledge(packet.messageId);
+        this.queuedMessageCount = await this.queue.size();
+        this.lastActivity = reachedDestination
+          ? `Target phone received ${packet.messageId}.`
+          : `Nearby peer received ${packet.messageId}; waiting for gateway ACK.`;
         for (const listener of this.receiptListeners) listener(packet.messageId);
         this.emitActivity();
         return;
@@ -430,7 +441,9 @@ export class NativeBleMeshTransport implements MeshTransportService {
     await this.sendPacket(peerId, { kind: 'RECEIPT', messageId: envelope.messageId });
     if (!isNew) return;
 
-    await this.queue.enqueue(envelope);
+    const reachedDestination = envelope.destinationType === 'SPECIFIC_NODE'
+      && envelope.destinationId === this.nodeId;
+    if (!reachedDestination) await this.queue.enqueue(envelope);
     this.queuedMessageCount = await this.queue.size();
     this.receivedCount += 1;
     this.lastReceived = {
@@ -442,7 +455,7 @@ export class NativeBleMeshTransport implements MeshTransportService {
     for (const listener of this.listeners) listener({ ...envelope });
     this.emitActivity();
 
-    if (canForwardEnvelope(envelope, this.now())) {
+    if (!reachedDestination && canForwardEnvelope(envelope, this.now())) {
       const forwarded = incrementEnvelopeHop(envelope, this.now());
       if (forwarded) await this.broadcastEnvelope(forwarded, peerId);
     }

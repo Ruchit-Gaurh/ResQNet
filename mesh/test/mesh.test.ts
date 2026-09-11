@@ -168,6 +168,45 @@ test('mock mesh relays A -> B -> C without an A/C link and suppresses loops', as
   assert.equal(nodeA.getNetworkHealth().connectivity, 'MESH_CONNECTED');
 });
 
+test('peer-addressed rescue alert reaches only its target and is not consumed by gateway sync', async () => {
+  const network = new MockMeshNetwork();
+  const gatewayRequests: MeshEnvelope[] = [];
+  const gateway = {
+    async sync(_url: string, request: { outboundEnvelopes: MeshEnvelope[] }) {
+      gatewayRequests.push(...request.outboundEnvelopes);
+      return {
+        acknowledgedMessageIds: request.outboundEnvelopes.map((item) => item.messageId),
+        inboundCases: [],
+        inboundMatches: [],
+        inboundTimelineEvents: [],
+        serverTimestamp: Date.now(),
+      };
+    },
+  };
+  const nodeA = new MockMeshTransport('A', network);
+  const nodeB = new MockMeshTransport('B', network, { gatewayClient: gateway });
+  const nodeC = new MockMeshTransport('C', network);
+  await Promise.all([nodeA.init(), nodeB.init(), nodeC.init()]);
+  network.connect('A', 'B');
+  network.connect('B', 'C');
+
+  let receivedAtC = 0;
+  nodeC.onMessageReceived(() => { receivedAtC += 1; });
+  const signal = envelope('CRITICAL', {
+    messageType: 'EMERGENCY',
+    destinationType: 'SPECIFIC_NODE',
+    destinationId: 'C',
+    payload: { kind: 'RESCUE_SIGNAL', action: 'RESCUER_NEARBY' },
+  });
+  await nodeA.sendMeshMessage(signal);
+
+  assert.equal(receivedAtC, 1);
+  assert.equal((await nodeC.getQueuedMessages()).length, 0);
+  await nodeB.syncWithGateway('mock://gateway');
+  assert.equal(gatewayRequests.length, 0);
+  assert.equal((await nodeB.getQueuedMessages()).some((item) => item.messageId === signal.messageId), true);
+});
+
 test('durable queue replays through A -> B -> C after the origin restarts', async () => {
   const queueStorage = new InMemoryMessageQueueStorage();
   const seenStorage = new InMemorySeenMessageStore();
