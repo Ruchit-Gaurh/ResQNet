@@ -13,7 +13,16 @@ interface MatchResult {
 interface GeoLocation {
   lat?: number;
   lng?: number;
+  accuracyMeters?: number;
   zone?: string;
+}
+
+function hasUsefulCoordinates(location: GeoLocation): location is GeoLocation & { lat: number; lng: number } {
+  return (
+    Number.isFinite(location.lat) &&
+    Number.isFinite(location.lng) &&
+    (location.accuracyMeters == null || location.accuracyMeters <= 50_000)
+  );
 }
 
 /**
@@ -82,7 +91,7 @@ export function matchLocation(loc1?: GeoLocation | null, loc2?: GeoLocation | nu
   }
 
   // Try coordinate-based comparison first
-  if (loc1.lat != null && loc1.lng != null && loc2.lat != null && loc2.lng != null) {
+  if (hasUsefulCoordinates(loc1) && hasUsefulCoordinates(loc2)) {
     const distance = haversineDistance(loc1.lat, loc1.lng, loc2.lat, loc2.lng);
     const distanceRounded = Math.round(distance * 100) / 100;
 

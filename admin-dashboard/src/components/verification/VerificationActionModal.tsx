@@ -134,7 +134,7 @@ export const VerificationActionModal: React.FC<VerificationActionModalProps> = (
         <div className="bg-amber-50 border border-amber-200 rounded p-2 text-[11px] text-amber-800 flex items-start space-x-2">
           <AlertCircle size={14} className="text-amber-600 flex-shrink-0 mt-0.5" />
           <span>
-            Confirming this will mark the person as <strong>VERIFIED</strong>. An encrypted confirmation packet will be broadcast across the BLE mesh to the family.
+            Confirming this sends an authorized decision to the backend. The family app receives the verified status on its next successful sync.
           </span>
         </div>
 
@@ -151,7 +151,7 @@ export const VerificationActionModal: React.FC<VerificationActionModalProps> = (
             className="px-4 py-1.5 rounded bg-blue-600 hover:bg-blue-700 text-white font-bold transition-colors flex items-center space-x-1 shadow-xs"
           >
             <ShieldCheck size={14} />
-            <span>Confirm & Dispatch Mesh Packet</span>
+            <span>Confirm Identity</span>
           </button>
         </div>
       </div>

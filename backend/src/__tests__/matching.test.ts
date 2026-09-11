@@ -79,6 +79,15 @@ describe('Matching Module', () => {
       expect(zoneMatch.score).toBeGreaterThanOrEqual(70);
       expect(zoneMatch.warnings.some(w => w.includes('Exact coordinates unavailable'))).toBe(true);
     });
+
+    it('does not treat placeholder coordinates with city-scale uncertainty as an exact location', () => {
+      const zoneMatch = matchLocation(
+        { lat: 0, lng: 0, accuracyMeters: 40_075_000, zone: 'Zone A' },
+        { lat: 0, lng: 0, accuracyMeters: 40_075_000, zone: 'Zone B' },
+      );
+      expect(zoneMatch.score).toBeLessThan(100);
+      expect(zoneMatch.warnings.some(w => w.includes('zone-based'))).toBe(true);
+    });
   });
 
   describe('Timeline Matcher', () => {

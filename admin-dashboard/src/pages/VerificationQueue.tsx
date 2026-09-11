@@ -38,7 +38,7 @@ export const VerificationQueue: React.FC<VerificationQueueProps> = ({
               Human-in-the-Loop Verification Queue
             </h2>
             <p className="text-xs text-slate-500">
-              AI correlation suggests identity matches • Authorized responders verify evidence before dispatching P2P confirm packet
+              Candidate scoring suggests possible matches • Authorized responders must verify evidence before case status changes
             </p>
           </div>
         </div>
@@ -80,10 +80,10 @@ export const VerificationQueue: React.FC<VerificationQueueProps> = ({
 
         {showSop && (
           <div className="px-4 pb-3 pt-1 text-xs text-blue-900 border-t border-blue-200/60 space-y-1">
-            <p>1. Cross-reference name spelling, phonetic variations, and language transliterations (RapidFuzz token score).</p>
+            <p>1. Cross-reference name spelling and the evidence summary produced by the current matching service.</p>
             <p>2. Correlate clothing descriptions with intake notes from field hospitals and relief camps.</p>
             <p>3. Upon clicking <strong>[ Review & Confirm Identity ]</strong>, check off the physical evidence examined.</p>
-            <p>4. Once confirmed, an encrypted Ed25519 update packet is dispatched across the mesh to the family.</p>
+            <p>4. Once confirmed, the backend records an auditable status update for the family app to retrieve.</p>
           </div>
         )}
       </div>

@@ -13,6 +13,7 @@ vi.mock('../config/database', () => {
       },
       case: {
         create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
         findMany: vi.fn().mockResolvedValue([]),
       },
       sighting: {
@@ -31,7 +32,9 @@ vi.mock('../config/database', () => {
       $transaction: vi.fn(async (cb) => {
         const tx = {
           syncMessage: { create: vi.fn() },
-          case: { create: vi.fn() },
+          case: {
+            create: vi.fn().mockResolvedValue({ id: 'case-internal-1', type: 'MISSING' }),
+          },
           sighting: { create: vi.fn() },
           safeCheckIn: { create: vi.fn() },
         };
@@ -45,7 +48,7 @@ describe('Sync Module API (Idempotent Mesh Gateway)', () => {
   let server: Server;
   let baseUrl: string;
 
-  const publicToken = generateTestToken('PUBLIC', 'mesh-gateway');
+  const publicToken = generateTestToken('PUBLIC', 'mobile-DEVICE-NODE-1');
 
   beforeAll(async () => {
     server = createServer(app);
@@ -203,5 +206,23 @@ describe('Sync Module API (Idempotent Mesh Gateway)', () => {
     expect(data2.acknowledgedMessageIds).toEqual(['msg-uuid-001']);
     // Transaction called only once across the two batches
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a mobile token that claims another device identity', async () => {
+    const wrongDeviceToken = generateTestToken('PUBLIC', 'mobile-OTHER-DEVICE');
+    const res = await fetch(`${baseUrl}/api/v1/sync/batch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${wrongDeviceToken}`,
+      },
+      body: JSON.stringify({
+        deviceId: 'DEVICE-NODE-1',
+        lastSyncTimestamp: 0,
+        outboundEnvelopes: [],
+      }),
+    });
+    expect(res.status).toBe(403);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });

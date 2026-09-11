@@ -1,0 +1,22 @@
+{
+  "name": "@resqnet/mesh",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/mesh/index.js",
+  "types": "dist/mesh/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/mesh/test/*.test.js",
+    "demo": "npm run build && node dist/mesh/demo.js",
+    "dev:broker": "npm run build && node dist/mesh/dev-broker/server.js"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.1",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "ws": "^8.21.3"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "rootDir": "..",
+    "outDir": ".test-dist",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/services/LocalQueueService.ts",
+    "src/services/DevNodeIdentity.ts",
+    "src/services/ReportSubmissionService.ts",
+    "test/**/*.ts",
+    "../mesh/**/*.ts",
+    "../shared/types/index.ts"
+  ],
+  "exclude": [
+    "../mesh/test",
+    "../mesh/demo.ts",
+    "node_modules",
+    ".test-dist"
+  ]
+}

@@ -36,6 +36,7 @@ interface PersonData {
 interface GeoLocation {
   lat?: number;
   lng?: number;
+  accuracyMeters?: number;
   zone?: string;
 }
 
@@ -66,6 +67,7 @@ function extractLocation(locationData: unknown): GeoLocation | null {
   return {
     lat: loc.lat as number | undefined,
     lng: loc.lng as number | undefined,
+    accuracyMeters: loc.accuracyMeters as number | undefined,
     zone: loc.zone as string | undefined,
   };
 }

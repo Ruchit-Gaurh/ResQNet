@@ -139,7 +139,7 @@ class ApiService {
         if (res.ok) {
           const json = await res.json();
           const remoteCases = json.cases || json;
-          if (Array.isArray(remoteCases) && remoteCases.length > 0) {
+          if (Array.isArray(remoteCases)) {
             this.cases = remoteCases;
             return remoteCases;
           }
@@ -235,7 +235,7 @@ class ApiService {
         if (res.ok) {
           const json = await res.json();
           const remoteMatches = json.matches || json;
-          if (Array.isArray(remoteMatches) && remoteMatches.length > 0) {
+          if (Array.isArray(remoteMatches)) {
             this.matches = remoteMatches;
             return remoteMatches;
           }
@@ -253,6 +253,24 @@ class ApiService {
     notes?: string,
     evidenceUsed: string[] = ['EVID-PHOTO-SIMILARITY', 'EVID-PHYSICAL-IDENTIFIERS']
   ): Promise<{ success: boolean; message: string }> {
+    if (this.isLiveBackend) {
+      const response = await this.authFetch(`/admin/matches/${matchId}/verify`, {
+        method: 'POST',
+        body: JSON.stringify({
+          decision: 'VERIFY',
+          reviewerId: reviewerName,
+          notes: notes || 'Verified identity by responder',
+          evidenceUsed
+        })
+      });
+      if (!response.ok) {
+        throw new Error(`Backend verification failed with HTTP ${response.status}.`);
+      }
+      await Promise.all([this.getCases(), this.getAllMatches()]);
+      this.notify();
+      return { success: true, message: 'Identity confirmed by the backend. Family notified.' };
+    }
+
     const match = this.matches.find((m) => m.matchId === matchId);
     if (match) {
       match.status = 'VERIFIED';
@@ -290,30 +308,29 @@ class ApiService {
     };
     this.auditLogs = [auditEntry, ...this.auditLogs];
 
-    if (this.isLiveBackend) {
-      try {
-        await this.authFetch(`/admin/matches/${matchId}/verify`, {
-          method: 'POST',
-          body: JSON.stringify({
-            decision: 'VERIFY',
-            reviewerId: reviewerName,
-            notes: notes || 'Verified identity by responder',
-            evidenceUsed
-          })
-        });
-        // Refresh live state
-        await this.getCases();
-        await this.getAllMatches();
-      } catch (err) {
-        console.warn('Backend sync failed', err);
-      }
-    }
-
     this.notify();
-    return { success: true, message: 'Identity confirmed and case marked VERIFIED. Family notified.' };
+    return { success: true, message: 'Identity confirmed in local demonstration data.' };
   }
 
   public async rejectMatch(matchId: string, reviewerName: string, notes?: string): Promise<void> {
+    if (this.isLiveBackend) {
+      const response = await this.authFetch(`/admin/matches/${matchId}/verify`, {
+        method: 'POST',
+        body: JSON.stringify({
+          decision: 'REJECT',
+          reviewerId: reviewerName,
+          notes: notes || 'Rejected candidate match',
+          evidenceUsed: ['REVIEWER_DISCRETION']
+        })
+      });
+      if (!response.ok) {
+        throw new Error(`Backend rejection failed with HTTP ${response.status}.`);
+      }
+      await this.getAllMatches();
+      this.notify();
+      return;
+    }
+
     const match = this.matches.find((m) => m.matchId === matchId);
     if (match) {
       match.status = 'REJECTED';
@@ -336,23 +353,6 @@ class ApiService {
       evidenceItems: ['REVIEWER_DISCRETION']
     };
     this.auditLogs = [auditEntry, ...this.auditLogs];
-
-    if (this.isLiveBackend) {
-      try {
-        await this.authFetch(`/admin/matches/${matchId}/verify`, {
-          method: 'POST',
-          body: JSON.stringify({
-            decision: 'REJECT',
-            reviewerId: reviewerName,
-            notes: notes || 'Rejected candidate match',
-            evidenceUsed: ['REVIEWER_DISCRETION']
-          })
-        });
-        await this.getAllMatches();
-      } catch (err) {
-        console.warn('Backend reject match sync failed', err);
-      }
-    }
 
     this.notify();
   }

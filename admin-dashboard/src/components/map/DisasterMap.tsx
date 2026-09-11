@@ -2,9 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Polygon, Polyline, Marker, Popup, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { DisasterZone, FacilityLocation, MeshNodeStatus, DisasterCase, PhoneMeshCluster } from '../../types';
-import { 
-  Shield, Eye, EyeOff, Radio, Hospital, Tent, Layers, Users, MapPin, 
-  Navigation, Compass, Info, CheckCircle2, AlertTriangle, Activity, 
+import {
+  Shield, Eye, EyeOff, Radio, Hospital, Tent, Layers, Users, MapPin,
+  Navigation, Compass, Info, CheckCircle2, AlertTriangle, Activity,
   Smartphone, Waves, Flame, Zap, X, Signal, Battery, ChevronRight
 } from 'lucide-react';
 
@@ -169,10 +169,10 @@ export const DisasterMap: React.FC<DisasterMapProps> = ({
 }) => {
   const [selectedZone, setSelectedZone] = useState<string>('ALL');
   const [privacyMode, setPrivacyMode] = useState<'RESPONDER' | 'PUBLIC'>('RESPONDER');
-  
+
   // Default to 100% free OSM standard tiles (NO WATERMARK, NO API KEY)
   const [mapTileStyle, setMapTileStyle] = useState<'OSM' | 'SATELLITE' | 'TOPO'>('OSM');
-  
+
   // Layer Toggles
   const [showZones, setShowZones] = useState<boolean>(true);
   const [showFacilities, setShowFacilities] = useState<boolean>(true);

@@ -1,8 +1,41 @@
 import prisma from '../../config/database';
 import { generateCaseId, generateSightingId, generateCheckInId } from '../../utils/id-generator';
 import { auditService, AuditActions } from '../audit/audit.service';
+import { matchingService } from '../matching/matching.service';
 import type { SyncBatchInput } from './sync.validation';
 import type { MeshMessageType, PriorityLevel, ReportSource } from '@prisma/client';
+
+type CreatedCaseForMatching = { id: string; type: 'MISSING' | 'FOUND' | 'UNIDENTIFIED_PATIENT' };
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function timelineCopy(action: string, metadata: unknown): { title: string; description: string } {
+  const detail = metadata && typeof metadata === 'object'
+    ? metadata as Record<string, unknown>
+    : {};
+  if (action === AuditActions.MATCH_CANDIDATE_GENERATED) {
+    const score = typeof detail.score === 'number' ? ` (prototype score ${detail.score})` : '';
+    return {
+      title: 'Possible match identified',
+      description: `The matching service found a candidate${score}. Human confirmation is still required.`,
+    };
+  }
+  if (action === AuditActions.VERIFICATION_PERFORMED) {
+    return {
+      title: 'Human verification completed',
+      description: `An authorized responder recorded: ${stringValue(detail.decision) ?? 'REVIEWED'}.`,
+    };
+  }
+  if (action === AuditActions.CASE_STATUS_CHANGED) {
+    return {
+      title: 'Case status updated',
+      description: `The verified case status is now ${stringValue(detail.newStatus)?.replaceAll('_', ' ') ?? 'updated'}.`,
+    };
+  }
+  return { title: action.replaceAll('_', ' '), description: 'An auditable case update was recorded.' };
+}
 
 export const syncService = {
   async processBatch(request: SyncBatchInput) {
@@ -23,7 +56,7 @@ export const syncService = {
         }
 
         // Process based on message type within a transaction
-        await prisma.$transaction(async (tx) => {
+        const createdCase = await prisma.$transaction(async (tx): Promise<CreatedCaseForMatching | undefined> => {
           // Record the sync message FIRST (unique constraint prevents duplicates)
           await tx.syncMessage.create({
             data: {
@@ -41,10 +74,9 @@ export const syncService = {
           switch (envelope.messageType) {
             case 'MISSING_PERSON': {
               const person = payload.person as Record<string, unknown> || payload;
-              const caseId = generateCaseId();
-              await tx.case.create({
+              const created = await tx.case.create({
                 data: {
-                  caseId,
+                  caseId: stringValue(payload.caseId) ?? generateCaseId(),
                   type: 'MISSING',
                   status: 'SEARCHING',
                   priority: (envelope.priority || 'NORMAL') as PriorityLevel,
@@ -58,32 +90,33 @@ export const syncService = {
                   createdById: envelope.senderPseudonym,
                 },
               });
-              break;
+              return { id: created.id, type: created.type };
             }
 
             case 'FOUND_PERSON': {
               const person = payload.person as Record<string, unknown> || payload;
-              const caseId = generateCaseId();
-              await tx.case.create({
+              const unknownIdentity = !stringValue(person.name) || person.name === 'UNKNOWN PERSON';
+              const created = await tx.case.create({
                 data: {
-                  caseId,
-                  type: 'FOUND',
+                  caseId: stringValue(payload.caseId) ?? generateCaseId(),
+                  type: unknownIdentity ? 'UNIDENTIFIED_PATIENT' : 'FOUND',
                   status: 'INFORMATION_RECEIVED',
                   priority: 'NORMAL',
                   personName: (person.name as string) || 'Unknown Person',
                   personData: person as object,
-                  lastKnownLocation: payload.location as object | undefined,
+                  lastKnownLocation: (payload.lastKnownLocation ?? payload.location) as object | undefined,
+                  lastKnownTime: payload.lastKnownTime ? new Date(payload.lastKnownTime as string) : undefined,
                   source: (payload.source as ReportSource) || 'PUBLIC',
                   sourceTrustScore: 0.5,
                   verificationState: 'UNVERIFIED',
                   createdById: envelope.senderPseudonym,
                 },
               });
-              break;
+              return { id: created.id, type: created.type };
             }
 
             case 'SIGHTING': {
-              const sightingId = generateSightingId();
+              const sightingId = stringValue(payload.sightingId) ?? generateSightingId();
               // Resolve targetCaseId if provided
               let internalCaseId: string | null = null;
               if (payload.targetCaseId) {
@@ -98,37 +131,54 @@ export const syncService = {
                   targetCaseId: internalCaseId,
                   personDescription: (payload.personDescription as string) || 'Sighting from mesh',
                   location: (payload.location as object) || {},
+                  timestamp: payload.timestamp ? new Date(payload.timestamp as string) : undefined,
                   clothingDescription: payload.clothingDescription as string | undefined,
                   directionOfMovement: payload.directionOfMovement as string | undefined,
                   confidenceScore: (payload.confidenceScore as number) || 0.5,
+                  photoUrl: stringValue(payload.photoUrl),
                   reportedByPseudonym: envelope.senderPseudonym,
                   verificationState: 'UNVERIFIED',
                 },
               });
-              break;
+              return undefined;
             }
 
             case 'SAFE_STATUS': {
-              const checkInId = generateCheckInId();
+              const checkInId = stringValue(payload.checkInId) ?? generateCheckInId();
               await tx.safeCheckIn.create({
                 data: {
                   checkInId,
                   personName: (payload.personName as string) || 'Unknown',
                   phoneNumber: payload.phoneNumber as string | undefined,
                   location: (payload.location as object) || {},
+                  timestamp: payload.timestamp ? new Date(payload.timestamp as string) : undefined,
                   statusMessage: payload.statusMessage as string | undefined,
                   affectedFamilyMembers: (payload.affectedFamilyMembers as string[]) || [],
                   senderPseudonym: envelope.senderPseudonym,
                 },
               });
-              break;
+              return undefined;
             }
 
             default:
               // Other message types — stored in SyncMessage only
-              break;
+              return undefined;
           }
         });
+
+        // Matching remains advisory. A valid, persisted disaster report is ACKed
+        // even if candidate generation is temporarily unavailable.
+        if (createdCase) {
+          try {
+            if (createdCase.type === 'MISSING') {
+              await matchingService.scanMissingCaseAgainstFound(createdCase.id);
+            } else {
+              await matchingService.scanFoundCaseAgainstMissing(createdCase.id);
+            }
+          } catch (error) {
+            console.error(`[SYNC] Matching failed for case ${createdCase.id}:`, error);
+          }
+        }
 
         acknowledgedMessageIds.push(envelope.messageId);
 
@@ -156,20 +206,42 @@ export const syncService = {
 
     // Gather inbound data since lastSyncTimestamp
     const sinceDate = new Date(request.lastSyncTimestamp);
+    const ownerIds = [request.deviceId, `MOBILE-${request.deviceId}`];
+    const ownedCases = await prisma.case.findMany({
+      where: { createdById: { in: ownerIds } },
+      select: { id: true },
+    });
+    const ownedInternalCaseIds = ownedCases.map((item) => item.id);
 
     const [inboundCases, inboundMatches, inboundTimelineEvents] = await Promise.all([
       prisma.case.findMany({
-        where: { updatedAt: { gt: sinceDate } },
+        where: {
+          createdById: { in: ownerIds },
+          updatedAt: { gt: sinceDate },
+        },
         orderBy: { updatedAt: 'desc' },
         take: 100,
       }),
       prisma.matchCandidate.findMany({
-        where: { createdAt: { gt: sinceDate } },
+        where: {
+          updatedAt: { gt: sinceDate },
+          OR: [
+            { targetCase: { createdById: { in: ownerIds } } },
+            { candidateCase: { createdById: { in: ownerIds } } },
+          ],
+        },
         orderBy: { createdAt: 'desc' },
         take: 50,
+        include: {
+          targetCase: { select: { caseId: true } },
+          candidateCase: { select: { caseId: true } },
+        },
       }),
       prisma.auditLog.findMany({
-        where: { timestamp: { gt: sinceDate } },
+        where: {
+          timestamp: { gt: sinceDate },
+          caseId: { in: ownedInternalCaseIds },
+        },
         orderBy: { timestamp: 'desc' },
         take: 100,
         select: {
@@ -179,6 +251,7 @@ export const syncService = {
           resourceId: true,
           timestamp: true,
           metadata: true,
+          case: { select: { caseId: true, verificationState: true } },
         },
       }),
     ]);
@@ -198,29 +271,39 @@ export const syncService = {
         verificationState: c.verificationState,
         createdAt: c.createdAt.toISOString(),
         updatedAt: c.updatedAt.toISOString(),
+        createdById: c.createdById || undefined,
         evidenceIds: [],
       })),
       inboundMatches: inboundMatches.map((m) => ({
         matchId: m.matchId,
-        targetMissingCaseId: m.targetMissingCaseId,
-        candidateFoundCaseId: m.candidateFoundCaseId,
+        targetMissingCaseId: m.targetCase.caseId,
+        candidateFoundCaseId: m.candidateCase.caseId,
         overallScore: m.overallScore,
         confidenceLevel: m.confidenceLevel,
         breakdown: m.breakdown,
         reasons: m.reasons,
         warnings: m.warnings,
         status: m.status,
+        reviewerId: m.reviewerId || undefined,
+        reviewedAt: m.reviewedAt?.toISOString(),
+        reviewNotes: m.reviewNotes || undefined,
         createdAt: m.createdAt.toISOString(),
       })),
-      inboundTimelineEvents: inboundTimelineEvents.map((e) => ({
-        eventId: e.id,
-        caseId: e.resourceId,
-        timestamp: e.timestamp.toISOString(),
-        source: 'RESPONDER' as const,
-        title: e.action,
-        description: JSON.stringify(e.metadata),
-        verificationStatus: 'UNVERIFIED' as const,
-      })),
+      inboundTimelineEvents: inboundTimelineEvents.map((e) => {
+        const copy = timelineCopy(e.action, e.metadata);
+        return {
+          eventId: e.id,
+          caseId: e.case?.caseId ?? e.resourceId,
+          timestamp: e.timestamp.toISOString(),
+          source: 'RESPONDER' as const,
+          title: copy.title,
+          description: copy.description,
+          verificationStatus:
+            e.action === AuditActions.MATCH_CANDIDATE_GENERATED
+              ? 'UNVERIFIED' as const
+              : e.case?.verificationState ?? 'UNVERIFIED' as const,
+        };
+      }),
       serverTimestamp: Date.now(),
     };
   },

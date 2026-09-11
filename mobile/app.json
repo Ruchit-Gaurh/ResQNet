@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "ResQNet",
+    "slug": "resqnet",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "android": {
+      "package": "org.resqnet.mobile"
+    },
+    "plugins": [
+      "./plugins/withResQNetBle",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow ResQNet to attach a photo to this disaster report.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ]
+    ]
+  }
+}
