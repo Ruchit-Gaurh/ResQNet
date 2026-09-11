@@ -1,0 +1,167 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import type { MeshEnvelope } from '../../shared/types/index';
+import { MockMeshNetwork, MockMeshTransport } from '../../mesh/mock/MockMeshTransport';
+import { InMemoryLocalStorage, LocalQueueService } from '../src/services/LocalQueueService';
+import { getOrCreateDevNodeId } from '../src/services/DevNodeIdentity';
+import { ReportSubmissionService } from '../src/services/ReportSubmissionService';
+
+function idFactory(): () => string {
+  let id = 0;
+  return () => `00000000-0000-4000-8000-${String(++id).padStart(12, '0')}`;
+}
+
+test('missing, found, safe, and sighting submissions persist before transport', async () => {
+  const storage = new InMemoryLocalStorage();
+  const localQueue = new LocalQueueService(storage, () => 1_700_000_000_000);
+  const network = new MockMeshNetwork();
+  const mesh = new MockMeshTransport('PHONE-A', network);
+  await mesh.init();
+  const submissions = new ReportSubmissionService(localQueue, mesh, {
+    senderPseudonym: 'TEST-PSEUDONYM',
+    createId: idFactory(),
+    now: () => 1_700_000_000_000,
+  });
+
+  await submissions.submitMissing({ name: 'Rahul Sharma', approximateAge: 22, zone: 'Zone A' });
+  await submissions.submitFound({ name: '', physicalDescription: 'Blue shirt', zone: 'Camp 7' });
+  await submissions.submitSafe({ name: 'Aman', zone: 'School shelter' });
+  await submissions.submitSighting({ personDescription: 'Young adult', zone: 'Sector 4' });
+
+  const restoredQueue = new LocalQueueService(storage);
+  const records = await restoredQueue.getRecords();
+  assert.equal(records.length, 4);
+  assert.deepEqual(
+    new Set(records.map((record) => record.envelope.messageType)),
+    new Set(['MISSING_PERSON', 'FOUND_PERSON', 'SAFE_STATUS', 'SIGHTING']),
+  );
+  assert.ok(records.every((record) => record.deliveryState === 'SAVED_LOCALLY'));
+  assert.equal((await restoredQueue.getCases()).length, 2);
+});
+
+test('local save survives a transport error and does not claim delivery', async () => {
+  const storage = new InMemoryLocalStorage();
+  const localQueue = new LocalQueueService(storage);
+  const failingMesh = {
+    async init() {},
+    async sendMeshMessage(_envelope: MeshEnvelope<unknown>) {
+      throw new Error('Radio unavailable');
+    },
+    async getNearbyPeers() { return []; },
+    async getQueuedMessages() { return []; },
+    getNetworkHealth() {
+      return {
+        connectivity: 'ISOLATED' as const,
+        nearbyPeerCount: 0,
+        queuedMessageCount: 0,
+        batteryMode: 'NORMAL' as const,
+      };
+    },
+    onMessageReceived() { return () => undefined; },
+    async syncWithGateway() { throw new Error('No gateway'); },
+  };
+  const submissions = new ReportSubmissionService(localQueue, failingMesh, {
+    senderPseudonym: 'TEST',
+    createId: idFactory(),
+  });
+
+  const result = await submissions.submitMissing({ clothing: 'Blue shirt' });
+  assert.equal(result.deliveryState, 'SAVED_LOCALLY');
+  assert.equal(result.transportError, 'Radio unavailable');
+  const records = await localQueue.getRecords();
+  assert.equal(records.length, 1);
+  assert.equal(records[0]?.deliveryState, 'SAVED_LOCALLY');
+  assert.equal(records[0]?.lastError, 'Radio unavailable');
+});
+
+test('mobile submission follows local storage -> MeshTransportService -> A -> B -> C -> gateway ACK', async () => {
+  const fixedNow = Date.now();
+  const storage = new InMemoryLocalStorage();
+  const localQueue = new LocalQueueService(storage, () => fixedNow);
+  const network = new MockMeshNetwork();
+  const gateway = {
+    async sync(_url: string, request: { outboundEnvelopes: MeshEnvelope[] }) {
+      return {
+        acknowledgedMessageIds: request.outboundEnvelopes.map((item) => item.messageId),
+        inboundCases: [],
+        inboundMatches: [],
+        inboundTimelineEvents: [],
+        serverTimestamp: fixedNow + 1_000,
+      };
+    },
+  };
+  const testNow = () => fixedNow;
+  const nodeA = new MockMeshTransport('PHONE-A', network, { now: testNow });
+  const nodeB = new MockMeshTransport('MOCK-B', network, { now: testNow });
+  const nodeC = new MockMeshTransport('MOCK-C', network, { gatewayClient: gateway, now: testNow });
+  await Promise.all([nodeA.init(), nodeB.init(), nodeC.init()]);
+  network.connect('PHONE-A', 'MOCK-B');
+  network.connect('MOCK-B', 'MOCK-C');
+  const submissions = new ReportSubmissionService(localQueue, nodeA, {
+    senderPseudonym: 'TEST-PHONE',
+    createId: idFactory(),
+    now: testNow,
+  });
+
+  const result = await submissions.submitMissing({ clothing: 'Blue shirt' });
+  assert.equal(result.deliveryState, 'RELAYING');
+  const recordsBeforeAck = await localQueue.getRecords();
+  assert.equal(recordsBeforeAck[0]?.envelope.messageType, 'MISSING_PERSON');
+  assert.equal(recordsBeforeAck[0]?.deliveryState, 'RELAYING');
+  assert.equal((await nodeC.getQueuedMessages())[0]?.hopCount, 2);
+
+  const response = await nodeC.syncWithGateway('mock://gateway');
+  await localQueue.applySyncResponse(response);
+  assert.equal((await localQueue.getRecords())[0]?.deliveryState, 'DELIVERED_TO_NETWORK');
+  assert.equal((await nodeA.getQueuedMessages()).length, 0);
+});
+
+test('development node identity is stable per install and distinct across installations', async () => {
+  const installA = new InMemoryLocalStorage();
+  const installB = new InMemoryLocalStorage();
+  let sequence = 0;
+  const createId = () => `0000000${++sequence}-1111-4111-8111-111111111111`;
+
+  const firstA = await getOrCreateDevNodeId(installA, createId);
+  const restartedA = await getOrCreateDevNodeId(installA, createId);
+  const firstB = await getOrCreateDevNodeId(installB, createId);
+
+  assert.equal(firstA, restartedA);
+  assert.notEqual(firstA, firstB);
+});
+
+test('received peer envelope is deduplicated and does not become an owned case', async () => {
+  const storage = new InMemoryLocalStorage();
+  const localQueue = new LocalQueueService(storage, () => 1_700_000_000_000);
+  const remoteCaseEnvelope: MeshEnvelope<unknown> = {
+    messageId: 'remote-message',
+    messageType: 'MISSING_PERSON',
+    priority: 'HIGH',
+    createdAt: 1_700_000_000_000,
+    expiresAt: 1_700_000_060_000,
+    hopCount: 1,
+    maxHops: 7,
+    senderPseudonym: 'REMOTE',
+    destinationType: 'GATEWAY',
+    payload: {
+      caseId: 'REMOTE-CASE',
+      type: 'MISSING',
+      status: 'REGISTERED',
+      priority: 'HIGH',
+      person: { name: 'Rahul Sharma', gender: 'UNKNOWN' },
+      source: 'FAMILY',
+      sourceTrustScore: 0,
+      verificationState: 'UNVERIFIED',
+      createdAt: new Date(1_700_000_000_000).toISOString(),
+      updatedAt: new Date(1_700_000_000_000).toISOString(),
+      evidenceIds: [],
+    },
+  };
+
+  await localQueue.saveReceivedEnvelope(remoteCaseEnvelope, 'NODE-A');
+  await localQueue.saveReceivedEnvelope(remoteCaseEnvelope, 'NODE-A');
+
+  assert.equal((await localQueue.getReceivedRecords()).length, 1);
+  assert.equal((await localQueue.getCases()).length, 0);
+});

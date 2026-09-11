@@ -19,6 +19,7 @@ venv/
 ENV/
 dist/
 build/
+.test-dist/
 *.egg-info/
 .pytest_cache/
 
@@ -44,3 +45,6 @@ ios/build/
 *.sqlite
 *.sqlite3
 *.db
+
+# Private local planning context (keep shared docs tracked)
+docs/beginningPlan.md
