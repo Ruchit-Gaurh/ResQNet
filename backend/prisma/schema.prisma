@@ -1,0 +1,283 @@
+// ==============================================
+// RESQNET — Prisma Schema
+// Source of truth: shared/types/index.ts
+// ==============================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// Enums (matching shared/types/index.ts)
+// ==========================================
+
+enum CaseType {
+  MISSING
+  FOUND
+  UNIDENTIFIED_PATIENT
+}
+
+enum CaseStatus {
+  REGISTERED
+  SEARCHING
+  INFORMATION_RECEIVED
+  POSSIBLE_MATCH
+  UNDER_VERIFICATION
+  VERIFIED
+  FAMILY_NOTIFIED
+  REUNITED
+  CLOSED
+  REJECTED
+  DUPLICATE
+}
+
+enum PriorityLevel {
+  CRITICAL
+  HIGH
+  NORMAL
+  LOW
+}
+
+enum VerificationState {
+  UNVERIFIED
+  CORROBORATED
+  UNDER_REVIEW
+  VERIFIED
+  REJECTED
+}
+
+enum MatchConfidence {
+  NO_MATCH
+  WEAK_CANDIDATE
+  POSSIBLE_MATCH
+  STRONG_CANDIDATE
+  HUMAN_VERIFIED
+}
+
+enum MatchStatus {
+  PENDING_REVIEW
+  VERIFIED
+  REJECTED
+  NEEDS_MORE_INFO
+}
+
+enum ReportSource {
+  FAMILY
+  PUBLIC
+  VOLUNTEER
+  HOSPITAL
+  RELIEF_CAMP
+  RESPONDER
+}
+
+enum UserRole {
+  FAMILY
+  PUBLIC
+  VOLUNTEER
+  HOSPITAL
+  RELIEF_CAMP
+  RESPONDER_ADMIN
+}
+
+enum MeshMessageType {
+  SAFE_STATUS
+  MISSING_PERSON
+  FOUND_PERSON
+  SIGHTING
+  EMERGENCY
+  CASE_UPDATE
+  MATCH_CANDIDATE
+  VERIFICATION_REQUEST
+  VERIFICATION_RESULT
+  CASE_MERGE
+  CASE_SPLIT
+  HOSPITAL_ADMISSION
+  CAMP_REGISTRATION
+  SYNC_REQUEST
+  SYNC_RESPONSE
+  NETWORK_STATUS
+}
+
+// ==========================================
+// Models
+// ==========================================
+
+model Case {
+  id       String        @id @default(uuid())
+  caseId   String        @unique // e.g. "CASE-10291"
+  type     CaseType
+  status   CaseStatus    @default(REGISTERED)
+  priority PriorityLevel @default(NORMAL)
+
+  // Person profile (stored as structured JSON for flexibility)
+  personName String
+  personData Json // Full PersonProfile object
+
+  // Location
+  lastKnownLocation Json? // GeoLocation object
+  lastKnownTime     DateTime?
+
+  // Source & trust
+  source           ReportSource
+  sourceTrustScore Float        @default(0.5)
+
+  // Verification
+  verificationState VerificationState @default(UNVERIFIED)
+
+  // Ownership
+  createdById        String?
+  assignedVerifierId String?
+  corroborationCount Int     @default(0)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  evidenceReports    EvidenceReport[]
+  sightings          Sighting[]       @relation("CaseSightings")
+  matchesAsTarget    MatchCandidate[] @relation("TargetCase")
+  matchesAsCandidate MatchCandidate[] @relation("CandidateCase")
+  auditLogs          AuditLog[]
+
+  @@index([status])
+  @@index([type])
+  @@index([verificationState])
+  @@index([createdAt])
+}
+
+model EvidenceReport {
+  id         String       @id @default(uuid())
+  evidenceId String       @unique // e.g. "EVID-XXXXX"
+  caseId     String
+  type       String // e.g. "PHOTO", "DOCUMENT", "HOSPITAL_RECORD"
+  data       Json // Evidence payload
+  source     ReportSource
+  createdAt  DateTime     @default(now())
+
+  // Relations
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+}
+
+model Sighting {
+  id                  String            @id @default(uuid())
+  sightingId          String            @unique // e.g. "SIGHT-5510"
+  targetCaseId        String?
+  personDescription   String
+  location            Json // GeoLocation object
+  timestamp           DateTime          @default(now())
+  clothingDescription String?
+  directionOfMovement String?
+  confidenceScore     Float             @default(0)
+  photoUrl            String?
+  reportedByPseudonym String
+  verificationState   VerificationState @default(UNVERIFIED)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  // Relations
+  targetCase Case? @relation("CaseSightings", fields: [targetCaseId], references: [id])
+
+  @@index([targetCaseId])
+  @@index([verificationState])
+}
+
+model SafeCheckIn {
+  id                    String   @id @default(uuid())
+  checkInId             String   @unique // e.g. "SAFE-9012"
+  personName            String
+  phoneNumber           String?
+  location              Json // GeoLocation object
+  timestamp             DateTime @default(now())
+  statusMessage         String?
+  affectedFamilyMembers Json? // string[] stored as JSON
+  senderPseudonym       String
+  createdAt             DateTime @default(now())
+
+  @@index([personName])
+  @@index([phoneNumber])
+}
+
+model MatchCandidate {
+  id                   String          @id @default(uuid())
+  matchId              String          @unique // e.g. "MATCH-XXXXX"
+  targetMissingCaseId  String
+  candidateFoundCaseId String
+  overallScore         Float // 0 to 100
+  confidenceLevel      MatchConfidence
+  breakdown            Json // MatchScoreBreakdown object
+  reasons              Json // string[]
+  warnings             Json // string[]
+  status               MatchStatus     @default(PENDING_REVIEW)
+  reviewerId           String?
+  reviewedAt           DateTime?
+  reviewNotes          String?
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  // Relations
+  targetCase    Case           @relation("TargetCase", fields: [targetMissingCaseId], references: [id])
+  candidateCase Case           @relation("CandidateCase", fields: [candidateFoundCaseId], references: [id])
+  verifications Verification[]
+
+  @@index([targetMissingCaseId])
+  @@index([candidateFoundCaseId])
+  @@index([status])
+  @@index([overallScore])
+}
+
+model Verification {
+  id           String   @id @default(uuid())
+  matchId      String
+  decision     String // "VERIFY" | "REJECT" | "NEEDS_MORE_INFO"
+  reviewerId   String
+  reviewerRole UserRole
+  evidenceUsed Json // string[]
+  notes        String?
+  timestamp    DateTime @default(now())
+
+  // Relations
+  match MatchCandidate @relation(fields: [matchId], references: [id])
+
+  @@index([matchId])
+  @@index([reviewerId])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actor      String // userId or pseudonym of the actor
+  action     String // e.g. "CASE_CREATED", "VERIFICATION_PERFORMED"
+  resource   String // e.g. "Case", "MatchCandidate"
+  resourceId String // ID of the affected resource
+  caseId     String? // optional link to case for easy querying
+  metadata   Json? // Additional context (non-sensitive)
+  timestamp  DateTime @default(now())
+
+  // Relations
+  case Case? @relation(fields: [caseId], references: [id])
+
+  @@index([resourceId])
+  @@index([caseId])
+  @@index([action])
+  @@index([timestamp])
+}
+
+model SyncMessage {
+  id              String          @id @default(uuid())
+  messageId       String          @unique // UUID from MeshEnvelope — IDEMPOTENCY KEY
+  messageType     MeshMessageType
+  deviceId        String
+  senderPseudonym String
+  payload         Json
+  processedAt     DateTime        @default(now())
+
+  @@index([deviceId])
+  @@index([messageType])
+}
