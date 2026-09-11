@@ -429,32 +429,18 @@ class ApiService {
 
   public async getZones(): Promise<DisasterZone[]> {
     if (this.isLiveBackend) {
-      try {
-        const res = await this.authFetch('/telemetry/zones');
-        if (res.ok) {
-          const json = await res.json();
-          if (Array.isArray(json.zones)) {
-            this.zones = json.zones;
-            return this.zones;
-          }
-        }
-      } catch { /* Fallback */ }
+      // Do not show the legacy synthetic incident-zone feed as live truth.
+      this.zones = [];
+      return this.zones;
     }
     return this.zones;
   }
 
   public async getFacilities(): Promise<FacilityLocation[]> {
     if (this.isLiveBackend) {
-      try {
-        const res = await this.authFetch('/telemetry/facilities');
-        if (res.ok) {
-          const json = await res.json();
-          if (Array.isArray(json.facilities)) {
-            this.facilities = json.facilities;
-            return this.facilities;
-          }
-        }
-      } catch { /* Fallback */ }
+      // Facility authority integration is not available yet.
+      this.facilities = [];
+      return this.facilities;
     }
     return this.facilities;
   }
@@ -466,7 +452,9 @@ class ApiService {
         if (res.ok) {
           const json = await res.json();
           if (Array.isArray(json.nodes)) {
-            this.meshNodes = json.nodes;
+            this.meshNodes = json.nodes.filter((node: MeshNodeStatus) =>
+              Boolean(node.connectionState && node.lastSeenAt && node.transportMode),
+            );
             return this.meshNodes;
           }
         }
@@ -491,15 +479,8 @@ class ApiService {
 
   public async getPhoneClusters(): Promise<PhoneMeshCluster[]> {
     if (this.isLiveBackend) {
-      try {
-        const res = await this.authFetch('/telemetry/phone-clusters');
-        if (res.ok) {
-          const json = await res.json();
-          if (Array.isArray(json.clusters)) {
-            return json.clusters;
-          }
-        }
-      } catch { /* Fallback */ }
+      // Device-level presence supersedes the old synthetic cluster feed.
+      return [];
     }
     return this.isLiveBackend ? [] : INITIAL_PHONE_CLUSTERS;
   }
