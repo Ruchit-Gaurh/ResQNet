@@ -11,6 +11,26 @@ export const verificationController = {
     }
   },
 
+  async getAllMatches(req: Request, res: Response, next: NextFunction) {
+    try {
+      const statusFilter = typeof req.query.status === 'string' ? req.query.status : undefined;
+      const matches = await verificationService.getAllMatches(statusFilter);
+      res.json({ success: true, matches });
+    } catch (error) {
+      next(error);
+    }
+  },
+
+  async getAuditLogs(req: Request, res: Response, next: NextFunction) {
+    try {
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
+      const logs = await verificationService.getAuditLogs(limit);
+      res.json({ success: true, logs });
+    } catch (error) {
+      next(error);
+    }
+  },
+
   async verifyMatch(req: Request, res: Response, next: NextFunction) {
     try {
       const matchId = req.params.matchId as string;

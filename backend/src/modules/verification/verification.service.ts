@@ -39,6 +39,78 @@ export const verificationService = {
   },
 
   /**
+   * Get all match candidates with optional status filter.
+   */
+  async getAllMatches(statusFilter?: string) {
+    const where: any = {};
+    if (statusFilter) {
+      where.status = statusFilter;
+    }
+    const matches = await prisma.matchCandidate.findMany({
+      where,
+      orderBy: { overallScore: 'desc' },
+      include: {
+        targetCase: {
+          select: { caseId: true, personName: true, type: true, status: true },
+        },
+        candidateCase: {
+          select: { caseId: true, personName: true, type: true, status: true },
+        },
+      },
+    });
+
+    return matches.map((m) => ({
+      matchId: m.matchId,
+      targetMissingCaseId: m.targetCase.caseId,
+      candidateFoundCaseId: m.candidateCase.caseId,
+      targetPersonName: m.targetCase.personName,
+      candidatePersonName: m.candidateCase.personName,
+      overallScore: m.overallScore,
+      confidenceLevel: m.confidenceLevel,
+      breakdown: m.breakdown,
+      reasons: m.reasons,
+      warnings: m.warnings,
+      status: m.status,
+      reviewerId: m.reviewerId || undefined,
+      reviewedAt: m.reviewedAt ? m.reviewedAt.toISOString() : undefined,
+      reviewNotes: m.reviewNotes || undefined,
+      createdAt: m.createdAt.toISOString(),
+    }));
+  },
+
+  /**
+   * Get audit log trail for verification events.
+   */
+  async getAuditLogs(limit: number = 50) {
+    const logs = await prisma.auditLog.findMany({
+      orderBy: { timestamp: 'desc' },
+      take: limit,
+      include: {
+        case: {
+          select: { caseId: true, personName: true },
+        },
+      },
+    });
+
+    return logs.map((log) => {
+      const meta = (log.metadata && typeof log.metadata === 'object' ? log.metadata : {}) as Record<string, any>;
+      return {
+        id: log.id,
+        matchId: meta.matchId || `AUDIT-${log.id.slice(0, 8)}`,
+        missingCaseId: log.case?.caseId || log.resourceId,
+        candidateCaseId: meta.candidateCaseId || 'N/A',
+        missingPersonName: log.case?.personName || 'Subject',
+        candidatePersonName: meta.candidatePersonName || 'Candidate',
+        decision: (meta.decision || 'VERIFY') as 'VERIFY' | 'REJECT' | 'NEEDS_MORE_INFO',
+        reviewerName: log.actor,
+        timestamp: log.timestamp.toISOString(),
+        notes: meta.notes || `Action: ${log.action}`,
+        evidenceItems: meta.evidenceUsed || meta.evidenceItems || [],
+      };
+    });
+  },
+
+  /**
    * Verify or reject a match candidate.
    * ONLY authorized humans can verify — this is the critical safety gate.
    */

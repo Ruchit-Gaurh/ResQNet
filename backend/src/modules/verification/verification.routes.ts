@@ -7,12 +7,28 @@ import { verificationController } from './verification.controller';
 
 export const verificationRouter = Router();
 
+// GET /api/v1/admin/matches — All matches (with optional status filter)
+verificationRouter.get(
+  '/matches',
+  requireAuth,
+  requireRole('RESPONDER_ADMIN'),
+  verificationController.getAllMatches
+);
+
 // GET /api/v1/admin/matches/pending — Pending matches for human review
 verificationRouter.get(
   '/matches/pending',
   requireAuth,
   requireRole('RESPONDER_ADMIN'),
   verificationController.getPendingMatches
+);
+
+// GET /api/v1/admin/audit-logs — Verification audit trail
+verificationRouter.get(
+  '/audit-logs',
+  requireAuth,
+  requireRole('RESPONDER_ADMIN'),
+  verificationController.getAuditLogs
 );
 
 // POST /api/v1/admin/matches/:matchId/verify — Verify/reject a match

@@ -131,4 +131,33 @@ export const casesService = {
 
     return serializeCase(caseRecord, userRole);
   },
+
+  async listCases(filters: { type?: string; status?: string; zone?: string }, userRole: string) {
+    const where: any = {};
+    if (filters.type) {
+      where.type = filters.type;
+    }
+    if (filters.status) {
+      where.status = filters.status;
+    }
+
+    const cases = await prisma.case.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        evidenceReports: true,
+        sightings: true,
+      },
+    });
+
+    let results = cases.map((c) => serializeCase(c, userRole));
+    if (filters.zone) {
+      results = results.filter((c) => {
+        const zoneStr = (c.lastKnownLocation as any)?.zone;
+        return typeof zoneStr === 'string' && zoneStr.toLowerCase().includes(filters.zone!.toLowerCase());
+      });
+    }
+
+    return results;
+  },
 };

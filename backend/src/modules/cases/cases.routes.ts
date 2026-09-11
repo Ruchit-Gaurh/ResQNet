@@ -1,11 +1,18 @@
 import { Router } from 'express';
-import { requireAuth } from '../../middleware/auth';
+import { requireAuth, optionalAuth } from '../../middleware/auth';
 import { requireRole } from '../../middleware/role';
 import { validate } from '../../middleware/validation';
 import { createMissingCaseSchema, createFoundCaseSchema } from './cases.validation';
 import { casesController } from './cases.controller';
 
 export const casesRouter = Router();
+
+// GET /api/v1/cases — List cases with optional role and status/type/zone filters
+casesRouter.get(
+  '/',
+  optionalAuth,
+  casesController.listCases
+);
 
 // POST /api/v1/cases/missing — Create a missing person case
 casesRouter.post(

@@ -11,6 +11,7 @@ import { safeCheckinRouter } from './modules/safe-checkin/safe-checkin.routes';
 import { syncRouter } from './modules/sync/sync.routes';
 import { verificationRouter } from './modules/verification/verification.routes';
 import { authRouter } from './modules/auth/auth.routes';
+import { telemetryRouter } from './modules/telemetry/telemetry.routes';
 
 const app = express();
 
@@ -18,7 +19,7 @@ const app = express();
 // Global Middleware
 // ==========================================
 app.use(helmet());
-app.use(cors());
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '10mb' })); // Support base64 photos
 
 // ==========================================
@@ -37,6 +38,7 @@ app.use('/api/v1', safeCheckinRouter);
 app.use('/api/v1/sync', syncRouter);
 app.use('/api/v1/admin', verificationRouter);
 app.use('/api/v1/auth', authRouter);
+app.use('/api/v1/telemetry', telemetryRouter);
 
 // ==========================================
 // 404 Handler

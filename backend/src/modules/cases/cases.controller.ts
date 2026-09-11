@@ -32,4 +32,23 @@ export const casesController = {
       next(error);
     }
   },
+
+  async listCases(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { type, status, zone } = req.query;
+      const roleParam = req.query.role;
+      const role = req.user?.role || (typeof roleParam === 'string' ? roleParam : 'PUBLIC');
+      const cases = await casesService.listCases(
+        {
+          type: typeof type === 'string' ? type : undefined,
+          status: typeof status === 'string' ? status : undefined,
+          zone: typeof zone === 'string' ? zone : undefined,
+        },
+        role
+      );
+      res.json({ success: true, cases });
+    } catch (error) {
+      next(error);
+    }
+  },
 };

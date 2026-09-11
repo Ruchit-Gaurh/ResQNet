@@ -24,6 +24,7 @@ vi.mock('../config/database', () => {
       },
       auditLog: {
         create: vi.fn().mockResolvedValue({ id: 'audit-1' }),
+        findMany: vi.fn(),
       },
       $transaction: vi.fn(async (cb) => {
         const tx = {
@@ -221,6 +222,58 @@ describe('Verification & Human Review Workflow', () => {
       expect(data.matches.length).toBe(1);
       expect(data.matches[0].matchId).toBe('MATCH-9001');
       expect(data.matches[0].status).toBe('PENDING_REVIEW');
+    });
+
+    it('allows authorized RESPONDER_ADMIN to get all matches', async () => {
+      (prisma.matchCandidate.findMany as any).mockResolvedValue([
+        {
+          matchId: 'MATCH-9001',
+          overallScore: 91.2,
+          confidenceLevel: 'STRONG_CANDIDATE',
+          breakdown: {},
+          reasons: ['High phonetic name similarity'],
+          warnings: ['Photograph requires human verification'],
+          status: 'PENDING_REVIEW',
+          createdAt: new Date(),
+          targetCase: { caseId: 'CASE-10291', personName: 'Rahul Sharma', type: 'MISSING', status: 'SEARCHING' },
+          candidateCase: { caseId: 'CASE-10305', personName: 'Rahool Sharma', type: 'FOUND', status: 'INFORMATION_RECEIVED' },
+        },
+      ]);
+
+      const res = await fetch(`${baseUrl}/api/v1/admin/matches`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      const data = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(data.success).toBe(true);
+      expect(data.matches.length).toBe(1);
+    });
+
+    it('allows authorized RESPONDER_ADMIN to get audit logs', async () => {
+      (prisma.auditLog.findMany as any).mockResolvedValue([
+        {
+          id: 'audit-12345678',
+          actor: 'ADMIN-RUCHIT',
+          action: 'VERIFICATION_PERFORMED',
+          resource: 'MatchCandidate',
+          resourceId: 'MATCH-9001',
+          metadata: { decision: 'VERIFY', candidateCaseId: 'CASE-10305', notes: 'Verified' },
+          timestamp: new Date(),
+          case: { caseId: 'CASE-10291', personName: 'Rahul Sharma' },
+        },
+      ]);
+
+      const res = await fetch(`${baseUrl}/api/v1/admin/audit-logs`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      const data = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(data.success).toBe(true);
+      expect(data.logs.length).toBe(1);
+      expect(data.logs[0].decision).toBe('VERIFY');
+      expect(data.logs[0].missingCaseId).toBe('CASE-10291');
     });
   });
 });

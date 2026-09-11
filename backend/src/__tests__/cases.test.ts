@@ -202,38 +202,39 @@ describe('Cases API Module', () => {
     });
   });
 
+  const mockCaseRow = {
+    id: 'db-case-minor',
+    caseId: 'CASE-10291',
+    type: 'MISSING',
+    status: 'SEARCHING',
+    priority: 'HIGH',
+    personName: 'Minor Child',
+    personData: {
+      name: 'Minor Child',
+      age: 12,
+      isMinor: true,
+      gender: 'MALE',
+      phoneNumber: '+919999999999',
+      fatherMotherName: 'Parent Name',
+      medicalNeeds: 'Insulin dependent',
+      photoUrl: 'http://example.com/private-photo.jpg',
+    },
+    lastKnownLocation: {
+      lat: 28.6139,
+      lng: 77.2090,
+      zone: 'Zone A - Sector 4',
+    },
+    lastKnownTime: new Date('2026-09-11T08:30:00Z'),
+    source: 'FAMILY',
+    sourceTrustScore: 0.8,
+    verificationState: 'UNVERIFIED',
+    createdAt: new Date('2026-09-11T09:00:00Z'),
+    updatedAt: new Date('2026-09-11T09:00:00Z'),
+    corroborationCount: 1,
+    evidenceReports: [{ evidenceId: 'EVID-001' }],
+  };
+
   describe('GET /api/v1/cases/:caseId — Role-based projection', () => {
-    const mockCaseRow = {
-      id: 'db-case-minor',
-      caseId: 'CASE-10291',
-      type: 'MISSING',
-      status: 'SEARCHING',
-      priority: 'HIGH',
-      personName: 'Minor Child',
-      personData: {
-        name: 'Minor Child',
-        age: 12,
-        isMinor: true,
-        gender: 'MALE',
-        phoneNumber: '+919999999999',
-        fatherMotherName: 'Parent Name',
-        medicalNeeds: 'Insulin dependent',
-        photoUrl: 'http://example.com/private-photo.jpg',
-      },
-      lastKnownLocation: {
-        lat: 28.6139,
-        lng: 77.2090,
-        zone: 'Zone A - Sector 4',
-      },
-      lastKnownTime: new Date('2026-09-11T08:30:00Z'),
-      source: 'FAMILY',
-      sourceTrustScore: 0.8,
-      verificationState: 'UNVERIFIED',
-      createdAt: new Date('2026-09-11T09:00:00Z'),
-      updatedAt: new Date('2026-09-11T09:00:00Z'),
-      corroborationCount: 1,
-      evidenceReports: [{ evidenceId: 'EVID-001' }],
-    };
 
     it('redacts sensitive fields (phone, parent, medical, minor photo, exact GPS) for PUBLIC role', async () => {
       (prisma.case.findUnique as any).mockResolvedValue(mockCaseRow);
@@ -274,6 +275,23 @@ describe('Cases API Module', () => {
       expect(data.lastKnownLocation.lat).toBe(28.6139);
       expect(data.lastKnownLocation.lng).toBe(77.2090);
       expect(data.evidenceIds).toEqual(['EVID-001']);
+    });
+  });
+
+  describe('GET /api/v1/cases — List cases', () => {
+    it('returns list of cases with role projection', async () => {
+      (prisma.case.findMany as any).mockResolvedValue([mockCaseRow]);
+
+      const res = await fetch(`${baseUrl}/api/v1/cases`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      const data = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(data.success).toBe(true);
+      expect(Array.isArray(data.cases)).toBe(true);
+      expect(data.cases.length).toBe(1);
+      expect(data.cases[0].caseId).toBe('CASE-10291');
     });
   });
 });

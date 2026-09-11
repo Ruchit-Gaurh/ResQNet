@@ -8,21 +8,36 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({ onRefresh }) => {
   const [isLive, setIsLive] = useState(apiService.isLive());
+  const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  const checkHealth = async () => {
+    const health = await apiService.checkBackendHealth();
+    setBackendOnline(health.online);
+  };
+
   useEffect(() => {
-    return apiService.subscribe(() => {
+    checkHealth();
+    const timer = setInterval(checkHealth, 10000);
+    const unsub = apiService.subscribe(() => {
       setIsLive(apiService.isLive());
+      checkHealth();
     });
+    return () => {
+      clearInterval(timer);
+      unsub();
+    };
   }, []);
 
   const toggleBackendMode = () => {
     apiService.setMode(!isLive);
+    checkHealth();
     if (onRefresh) onRefresh();
   };
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setIsRefreshing(true);
+    await checkHealth();
     if (onRefresh) onRefresh();
     setTimeout(() => setIsRefreshing(false), 500);
   };
@@ -62,14 +77,22 @@ export const Navbar: React.FC<NavbarProps> = ({ onRefresh }) => {
         <button
           onClick={toggleBackendMode}
           className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-bold border transition-colors ${
-            isLive
-              ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300'
-              : 'bg-slate-800 border-slate-600 text-slate-300 hover:bg-slate-700'
+            !isLive
+              ? 'bg-slate-800 border-slate-600 text-slate-300 hover:bg-slate-700'
+              : backendOnline
+              ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300 shadow-xs'
+              : 'bg-amber-950/60 border-amber-500/50 text-amber-300'
           }`}
           title="Toggle Mock vs Live Backend"
         >
           <Server size={12} />
-          <span>{isLive ? 'Live API (4000)' : 'Mock Engine'}</span>
+          <span>
+            {!isLive
+              ? 'Mock Engine'
+              : backendOnline
+              ? 'Live API :4000 (Connected)'
+              : 'Live API :4000 (Connecting...)'}
+          </span>
         </button>
 
         {/* Mesh Status */}
