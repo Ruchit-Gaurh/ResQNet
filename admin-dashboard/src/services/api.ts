@@ -7,14 +7,18 @@ const DEFAULT_BACKEND_ORIGIN = 'https://resqnet-backend-2gof.onrender.com';
 const ADMIN_TOKEN_STORAGE_KEY = 'RESQNET_ADMIN_TOKEN';
 
 function normalizedBackendOrigin(): string {
-  const configured = import.meta.env.VITE_API_BASE_URL?.trim() || DEFAULT_BACKEND_ORIGIN;
-  return configured.replace(/\/api\/v1\/?$/, '').replace(/\/$/, '');
+  const configured = import.meta.env.VITE_API_BASE_URL?.trim();
+  // Local Vite development uses same-origin /api and /health proxy routes.
+  // This avoids CORS/browser-extension blocking of direct Render requests.
+  if (import.meta.env.DEV && !configured) return '';
+  const origin = configured || DEFAULT_BACKEND_ORIGIN;
+  return origin.replace(/\/api\/v1\/?$/, '').replace(/\/$/, '');
 }
 
 class ApiService {
   private isLiveBackend: boolean = true;
   private readonly backendOrigin = normalizedBackendOrigin();
-  private readonly backendBaseUrl = `${this.backendOrigin}/api/v1`;
+  private readonly backendBaseUrl = this.backendOrigin ? `${this.backendOrigin}/api/v1` : '/api/v1';
   private authToken: string | null = null;
 
   // In-memory reactive state (always available as fallback & immediate cache)
@@ -60,7 +64,7 @@ class ApiService {
   }
 
   public getBackendOrigin(): string {
-    return this.backendOrigin;
+    return this.backendOrigin || `${DEFAULT_BACKEND_ORIGIN} (via localhost proxy)`;
   }
 
   public isAdminAuthenticated(): boolean {
@@ -128,7 +132,7 @@ class ApiService {
 
   public async checkBackendHealth(): Promise<{ online: boolean; port: number; service?: string }> {
     try {
-      const res = await fetch(`${this.backendOrigin}/health`);
+      const res = await fetch(this.backendOrigin ? `${this.backendOrigin}/health` : '/health');
       if (res.ok) {
         const data = await res.json();
         return { online: true, port: 443, service: data.service };
