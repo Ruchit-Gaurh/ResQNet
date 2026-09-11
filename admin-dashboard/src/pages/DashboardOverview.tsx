@@ -34,145 +34,121 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   const criticalCount = cases.filter((c) => c.priority === 'CRITICAL').length;
 
   return (
-    <div className="space-y-6">
-      {/* Top Banner Alert / Hackathon Demo CTA */}
-      <div className="bg-gradient-to-r from-blue-900/60 via-indigo-900/50 to-slate-900 border border-blue-500/30 rounded-2xl p-5 flex flex-wrap items-center justify-between gap-4 shadow-xl">
-        <div className="space-y-1">
-          <div className="flex items-center space-x-2">
-            <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-            <h2 className="text-base font-bold text-white tracking-wide">
-              DISASTER COORDINATION ACTIVE — NCR FLASH FLOOD & STRUCTURAL COLLAPSE
-            </h2>
-          </div>
-          <p className="text-xs text-blue-200/80 max-w-2xl">
-            Store-and-forward mesh is operational across Zones A, B, and C. AI is analyzing potential identity correlations. All identity confirmations require human verification.
-          </p>
-        </div>
-        <button
-          onClick={onNavigateToDemo}
-          className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 rounded-xl shadow-lg shadow-blue-500/30 transition-all flex items-center space-x-2"
-        >
-          <span>🚀 Launch 5-Min Golden Demo</span>
-          <ArrowUpRight className="h-4 w-4" />
-        </button>
-      </div>
-
+    <div className="space-y-4">
       {/* KPI Metric Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         {/* Total Missing */}
-        <div className="bg-[#0F172A] border border-slate-800 rounded-xl p-4 space-y-2">
-          <div className="flex justify-between items-center text-slate-400 text-xs">
-            <span>Missing Reports</span>
-            <Search className="h-4 w-4 text-amber-400" />
+        <div className="bg-white border border-slate-200 border-t-3 border-t-red-500 rounded-xl p-3.5 shadow-xs space-y-1">
+          <div className="flex justify-between items-center text-slate-500 text-xs">
+            <span className="font-bold text-[11px] uppercase tracking-wider">Missing</span>
+            <Search className="h-4 w-4 text-red-500" />
           </div>
-          <div className="text-2xl font-black text-white font-mono">{missingCount}</div>
-          <div className="text-[11px] text-slate-500 flex items-center space-x-1">
-            <span className="text-red-400 font-semibold">{criticalCount} Critical</span>
-          </div>
+          <div className="text-2xl font-black text-slate-900 font-mono">{missingCount}</div>
+          <div className="text-[11px] text-red-600 font-bold">{criticalCount} Critical Priority</div>
         </div>
 
         {/* Total Found */}
-        <div className="bg-[#0F172A] border border-slate-800 rounded-xl p-4 space-y-2">
-          <div className="flex justify-between items-center text-slate-400 text-xs">
-            <span>Found / Intake</span>
-            <Users className="h-4 w-4 text-blue-400" />
+        <div className="bg-white border border-slate-200 border-t-3 border-t-amber-500 rounded-xl p-3.5 shadow-xs space-y-1">
+          <div className="flex justify-between items-center text-slate-500 text-xs">
+            <span className="font-bold text-[11px] uppercase tracking-wider">Field Intake</span>
+            <Users className="h-4 w-4 text-amber-500" />
           </div>
-          <div className="text-2xl font-black text-white font-mono">{foundCount}</div>
-          <div className="text-[11px] text-slate-500">Hospitals & Camps</div>
+          <div className="text-2xl font-black text-slate-900 font-mono">{foundCount}</div>
+          <div className="text-[11px] text-slate-500">Trauma Centers & Camps</div>
         </div>
 
         {/* Human Verified */}
-        <div className="bg-[#0F172A] border border-slate-800 rounded-xl p-4 space-y-2">
-          <div className="flex justify-between items-center text-slate-400 text-xs">
-            <span>Human Verified</span>
-            <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+        <div className="bg-white border border-slate-200 border-t-3 border-t-emerald-500 rounded-xl p-3.5 shadow-xs space-y-1">
+          <div className="flex justify-between items-center text-slate-500 text-xs">
+            <span className="font-bold text-[11px] uppercase tracking-wider">Verified</span>
+            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
           </div>
-          <div className="text-2xl font-black text-emerald-400 font-mono">{verifiedCount}</div>
-          <div className="text-[11px] text-emerald-500/80">Confirmed identities</div>
+          <div className="text-2xl font-black text-emerald-600 font-mono">{verifiedCount}</div>
+          <div className="text-[11px] text-emerald-700 font-semibold">Confirmed Identities</div>
         </div>
 
         {/* Pending AI Matches */}
         <div
           onClick={onNavigateToVerification}
-          className="bg-[#0F172A] border border-amber-500/40 hover:border-amber-400 rounded-xl p-4 space-y-2 cursor-pointer transition-all shadow-md shadow-amber-500/10"
+          className="bg-white border border-blue-300 border-t-3 border-t-blue-600 rounded-xl p-3.5 shadow-xs space-y-1 cursor-pointer hover:bg-blue-50/50 transition-colors"
         >
-          <div className="flex justify-between items-center text-amber-300 text-xs font-semibold">
-            <span>AI Match Queue</span>
-            <AlertTriangle className="h-4 w-4 text-amber-400 animate-pulse" />
+          <div className="flex justify-between items-center text-blue-700 text-xs">
+            <span className="font-bold text-[11px] uppercase tracking-wider">AI Queue</span>
+            <AlertTriangle className="h-4 w-4 text-blue-600 animate-pulse" />
           </div>
-          <div className="text-2xl font-black text-amber-300 font-mono">{pendingMatches.length}</div>
-          <div className="text-[11px] text-amber-400/80 flex items-center space-x-1 font-medium">
+          <div className="text-2xl font-black text-blue-700 font-mono">{pendingMatches.length}</div>
+          <div className="text-[11px] text-blue-600 font-bold flex items-center gap-0.5">
             <span>Review Candidates ▶</span>
           </div>
         </div>
 
         {/* Active Mesh Relays */}
-        <div className="bg-[#0F172A] border border-slate-800 rounded-xl p-4 space-y-2">
-          <div className="flex justify-between items-center text-slate-400 text-xs">
-            <span>Active Relays</span>
-            <Radio className="h-4 w-4 text-sky-400" />
+        <div className="bg-white border border-slate-200 border-t-3 border-t-sky-500 rounded-xl p-3.5 shadow-xs space-y-1">
+          <div className="flex justify-between items-center text-slate-500 text-xs">
+            <span className="font-bold text-[11px] uppercase tracking-wider">BLE Relays</span>
+            <Radio className="h-4 w-4 text-sky-500" />
           </div>
-          <div className="text-2xl font-black text-sky-400 font-mono">18</div>
-          <div className="text-[11px] text-slate-500">BLE P2P Nodes</div>
+          <div className="text-2xl font-black text-sky-600 font-mono">18</div>
+          <div className="text-[11px] text-slate-500">P2P Mesh Online</div>
         </div>
 
         {/* Reunited / Closed */}
-        <div className="bg-[#0F172A] border border-slate-800 rounded-xl p-4 space-y-2">
-          <div className="flex justify-between items-center text-slate-400 text-xs">
-            <span>Family Reunited</span>
-            <HeartHandshake className="h-4 w-4 text-purple-400" />
+        <div className="bg-white border border-slate-200 border-t-3 border-t-purple-500 rounded-xl p-3.5 shadow-xs space-y-1">
+          <div className="flex justify-between items-center text-slate-500 text-xs">
+            <span className="font-bold text-[11px] uppercase tracking-wider">Reunited</span>
+            <HeartHandshake className="h-4 w-4 text-purple-500" />
           </div>
-          <div className="text-2xl font-black text-purple-400 font-mono">1</div>
-          <div className="text-[11px] text-slate-500">Cases Completed</div>
+          <div className="text-2xl font-black text-purple-600 font-mono">1</div>
+          <div className="text-[11px] text-slate-500">Family Completed</div>
         </div>
       </div>
 
-      {/* Main Grid: Active Disaster Cases Table & Live Audit Trail */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Grid: Cases Table & Live Audit Trail */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Cases Table */}
-        <div className="lg:col-span-2 bg-[#0F172A] border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-            <h3 className="text-sm font-bold text-white tracking-wide flex items-center space-x-2">
-              <span>Active Disaster Case Records</span>
-              <span className="text-xs font-mono text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
+        <div className="lg:col-span-2 bg-white border border-slate-200 rounded-xl p-4 shadow-xs space-y-3">
+          <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+            <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center space-x-2">
+              <span>Active Case Records</span>
+              <span className="text-[10px] font-mono text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
                 {cases.length} Total
               </span>
             </h3>
-            <span className="text-xs text-slate-400">Canonical Case Graph</span>
+            <span className="text-[11px] text-slate-500 font-mono">Canonical Case Graph</span>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-slate-300">
-              <thead className="bg-slate-900/80 text-slate-400 uppercase font-mono text-[10px] tracking-wider">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-100 text-slate-600 uppercase font-mono text-[10px] tracking-wider">
                 <tr>
-                  <th className="px-3 py-2 rounded-l-lg">Case ID</th>
+                  <th className="px-3 py-2 rounded-l">Case ID</th>
                   <th className="px-3 py-2">Person Name</th>
                   <th className="px-3 py-2">Type</th>
                   <th className="px-3 py-2">Zone / Facility</th>
                   <th className="px-3 py-2">Status</th>
-                  <th className="px-3 py-2 rounded-r-lg">Priority</th>
+                  <th className="px-3 py-2 rounded-r">Priority</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/60">
+              <tbody className="divide-y divide-slate-100">
                 {cases.map((c) => (
-                  <tr key={c.caseId} className="hover:bg-slate-800/40 transition-colors">
-                    <td className="px-3 py-3 font-mono text-blue-400 font-medium">{c.caseId}</td>
-                    <td className="px-3 py-3">
-                      <div className="font-bold text-white">{c.person.name}</div>
-                      <div className="text-slate-500 text-[11px]">
+                  <tr key={c.caseId} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-3 py-2.5 font-mono text-blue-600 font-bold text-[11px]">{c.caseId}</td>
+                    <td className="px-3 py-2.5">
+                      <div className="font-bold text-slate-900">{c.person.name}</div>
+                      <div className="text-slate-500 text-[10px]">
                         Age: {c.person.age || c.person.approximateAge || 'Unknown'} • {c.person.gender}
                       </div>
                     </td>
-                    <td className="px-3 py-3">
-                      <span className="font-medium text-[11px] text-slate-300">{c.type}</span>
+                    <td className="px-3 py-2.5">
+                      <span className="font-semibold text-slate-700">{c.type}</span>
                     </td>
-                    <td className="px-3 py-3 text-slate-400 text-[11px]">
-                      {c.lastKnownLocation?.zone || 'Unspecified'}
+                    <td className="px-3 py-2.5 text-slate-600 text-[11px]">
+                      {c.lastKnownLocation?.zone ? c.lastKnownLocation.zone.split('—')[0] : 'Unspecified'}
                     </td>
-                    <td className="px-3 py-3">
+                    <td className="px-3 py-2.5">
                       <StatusBadge type="status" value={c.status} />
                     </td>
-                    <td className="px-3 py-3">
+                    <td className="px-3 py-2.5">
                       <StatusBadge type="priority" value={c.priority} />
                     </td>
                   </tr>
@@ -182,35 +158,37 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           </div>
         </div>
 
-        {/* Live Verification & Audit Trail Feed */}
-        <div className="bg-[#0F172A] border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-            <h3 className="text-sm font-bold text-white tracking-wide flex items-center space-x-2">
-              <Clock className="h-4 w-4 text-emerald-400" />
+        {/* Immutable Audit Trail */}
+        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs space-y-3">
+          <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+            <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center space-x-1.5">
+              <Clock className="h-4 w-4 text-emerald-600" />
               <span>Immutable Audit Trail</span>
             </h3>
-            <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
+            <span className="text-[10px] font-mono text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
               Accountability Log
             </span>
           </div>
 
-          <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+          <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
             {auditLogs.map((log) => (
-              <div key={log.id} className="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 space-y-1.5 text-xs">
+              <div key={log.id} className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 space-y-1 text-xs">
                 <div className="flex justify-between items-center">
-                  <span className="font-bold text-emerald-400">IDENTITY VERIFIED</span>
+                  <span className="font-extrabold text-[10px] text-emerald-700 bg-emerald-100 px-1.5 py-0.2 rounded">
+                    IDENTITY CONFIRMED
+                  </span>
                   <span className="font-mono text-[10px] text-slate-500">
                     {new Date(log.timestamp).toLocaleTimeString()}
                   </span>
                 </div>
-                <div className="text-slate-200 font-medium">
+                <div className="text-slate-900 font-bold text-xs mt-1">
                   {log.missingPersonName} ⇄ {log.candidatePersonName}
                 </div>
-                <div className="text-[11px] text-slate-400">
-                  Reviewer: <strong className="text-slate-300">{log.reviewerName}</strong>
+                <div className="text-[11px] text-slate-500">
+                  Reviewer: <strong className="text-slate-700">{log.reviewerName}</strong>
                 </div>
                 {log.notes && (
-                  <div className="text-[11px] text-slate-400 bg-slate-950/60 p-2 rounded border border-slate-800/60 mt-1 italic">
+                  <div className="text-[11px] text-slate-600 bg-white p-2 rounded border border-slate-200 mt-1 italic">
                     "{log.notes}"
                   </div>
                 )}

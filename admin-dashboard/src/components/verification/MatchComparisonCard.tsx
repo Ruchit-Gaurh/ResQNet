@@ -11,6 +11,8 @@ import {
   User,
   HeartPulse,
   Tag,
+  ChevronDown,
+  ChevronUp,
   Maximize2
 } from 'lucide-react';
 
@@ -34,49 +36,79 @@ export const MatchComparisonCard: React.FC<MatchComparisonCardProps> = ({
 
   if (!targetCase || !candidateCase) return null;
 
+  const score = match.overallScore;
+  const radius = 20;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (score / 100) * circumference;
+
+  let ringColor = '#16a34a'; // emerald
+  if (score < 70) ringColor = '#dc2626'; // rose
+  else if (score < 85) ringColor = '#d97706'; // amber
+
   return (
-    <div className="bg-[#0F172A] border border-slate-800 rounded-2xl shadow-xl overflow-hidden mb-6 transition-all hover:border-slate-700">
+    <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
       {/* Top Banner: AI Score Header */}
-      <div className="bg-gradient-to-r from-blue-950/60 via-slate-900 to-indigo-950/60 border-b border-slate-800 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+      <div className="px-5 py-3.5 flex items-center justify-between border-b border-slate-200 bg-slate-50/70">
         <div className="flex items-center space-x-3">
-          <div className="flex items-baseline space-x-2">
-            <span className="text-3xl font-black text-white font-mono tracking-tight">
-              {match.overallScore.toFixed(1)}%
-            </span>
-            <span className="text-xs uppercase tracking-widest font-bold text-blue-400">
-              MATCH CONFIDENCE
-            </span>
+          <div className="relative flex items-center justify-center">
+            <svg width="48" height="48" className="rotate-[-90deg]">
+              <circle cx="24" cy="24" r={radius} fill="none" stroke="#e2e8f0" strokeWidth="4" />
+              <circle
+                cx="24"
+                cy="24"
+                r={radius}
+                fill="none"
+                stroke={ringColor}
+                strokeWidth="4"
+                strokeDasharray={circumference}
+                strokeDashoffset={offset}
+                strokeLinecap="round"
+              />
+            </svg>
+            <div className="absolute inset-0 flex items-center justify-center font-mono font-black text-xs text-slate-900">
+              {score.toFixed(0)}%
+            </div>
           </div>
-          <StatusBadge type="confidence" value={match.confidenceLevel} />
+
+          <div>
+            <div className="flex items-center space-x-2">
+              <span className="font-extrabold text-xs uppercase tracking-wider text-slate-900">
+                Match Correlation Confidence
+              </span>
+              <StatusBadge type="confidence" value={match.confidenceLevel} />
+            </div>
+            <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+              Candidate ID: {match.matchId} • Multi-attribute RapidFuzz correlation
+            </p>
+          </div>
         </div>
 
-        <div className="flex items-center space-x-2">
-          <span className="text-xs text-slate-400 font-mono">Candidate ID: {match.matchId}</span>
-          <button
-            onClick={() => setShowFullDetails(!showFullDetails)}
-            className="text-xs text-slate-400 hover:text-slate-200 p-1 rounded hover:bg-slate-800"
-          >
-            <Maximize2 className="h-4 w-4" />
-          </button>
-        </div>
+        <button
+          onClick={() => setShowFullDetails(!showFullDetails)}
+          className="text-xs font-semibold text-slate-600 hover:text-blue-600 flex items-center space-x-1 transition-colors"
+        >
+          <span>{showFullDetails ? 'Hide Model Evidence' : 'Show Model Evidence'}</span>
+          {showFullDetails ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+        </button>
       </div>
 
       {/* Main Side-by-Side Comparison Container */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-slate-800">
+      <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-slate-200">
         {/* LEFT: Target Missing Person (Family Source) */}
-        <div className="p-6 space-y-4 bg-slate-900/30">
+        <div className="p-5 space-y-3.5">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
-              <span className="text-xs font-bold text-red-400 uppercase tracking-wider bg-red-950/60 border border-red-500/40 px-2 py-0.5 rounded">
-                MISSING PERSON REPORT
+              <span className="w-2 h-2 rounded-full bg-red-600" />
+              <span className="text-[10px] font-extrabold text-red-700 uppercase tracking-wider bg-red-50 border border-red-200 px-2 py-0.5 rounded">
+                Family Missing Report
               </span>
-              <span className="font-mono text-xs text-slate-500">{targetCase.caseId}</span>
+              <span className="font-mono text-xs text-slate-500 font-bold">{targetCase.caseId}</span>
             </div>
             <StatusBadge type="status" value={targetCase.status} />
           </div>
 
-          <div className="flex space-x-4">
-            <div className="relative h-32 w-28 rounded-xl overflow-hidden bg-slate-800 border border-slate-700 flex-shrink-0">
+          <div className="flex space-x-3.5 items-start">
+            <div className="w-24 h-28 rounded-lg overflow-hidden bg-slate-100 border border-slate-200 flex-shrink-0 relative">
               {targetCase.person.photoUrl ? (
                 <img
                   src={targetCase.person.photoUrl}
@@ -84,70 +116,80 @@ export const MatchComparisonCard: React.FC<MatchComparisonCardProps> = ({
                   className="h-full w-full object-cover"
                 />
               ) : (
-                <div className="h-full w-full flex items-center justify-center text-slate-500">
-                  <User className="h-10 w-10" />
+                <div className="h-full w-full flex items-center justify-center text-slate-400">
+                  <User className="h-8 w-8" />
                 </div>
               )}
-              <div className="absolute bottom-0 inset-x-0 bg-black/60 backdrop-blur-xs py-0.5 text-center text-[10px] text-slate-300 font-medium">
+              <div className="absolute bottom-0 inset-x-0 bg-black/60 py-0.5 text-center text-[9px] text-white font-bold">
                 Family Photo
               </div>
             </div>
 
-            <div className="space-y-1.5 flex-1 min-w-0">
-              <h3 className="text-lg font-bold text-white truncate">{targetCase.person.name}</h3>
+            <div className="space-y-1 min-w-0 flex-1">
+              <h3 className="text-base font-extrabold text-slate-900 truncate">{targetCase.person.name}</h3>
               {targetCase.person.nickname && (
-                <p className="text-xs text-slate-400">Nickname: <span className="text-slate-200">"{targetCase.person.nickname}"</span></p>
+                <p className="text-[11px] text-slate-500">
+                  Alias: <span className="text-slate-800 font-medium">"{targetCase.person.nickname}"</span>
+                </p>
               )}
-              <div className="text-xs text-slate-300 space-y-1">
-                <p>Age: <strong className="text-white font-mono">{targetCase.person.age} years</strong> • Gender: <strong className="text-white font-mono">{targetCase.person.gender}</strong></p>
-                <p className="truncate">Parent/Kin: <span className="text-slate-200">{targetCase.person.fatherMotherName}</span></p>
-                <p className="truncate">Contact: <span className="text-slate-300 font-mono">{targetCase.person.phoneNumber}</span></p>
+              <div className="text-xs text-slate-600 space-y-0.5 pt-0.5">
+                <p>
+                  Age: <strong className="text-slate-900">{targetCase.person.age} years</strong> • Gender:{' '}
+                  <strong className="text-slate-900">{targetCase.person.gender}</strong>
+                </p>
+                <p className="truncate">
+                  Kin Contact: <span className="text-slate-800">{targetCase.person.fatherMotherName}</span>
+                </p>
+                <p className="truncate font-mono text-[11px]">
+                  Phone: <span className="text-blue-700 font-bold">{targetCase.person.phoneNumber}</span>
+                </p>
               </div>
             </div>
           </div>
 
-          <div className="bg-slate-900/80 border border-slate-800/80 rounded-xl p-3 text-xs space-y-2">
-            <div className="flex items-center space-x-2 text-slate-300">
-              <MapPin className="h-3.5 w-3.5 text-red-400 flex-shrink-0" />
-              <span className="font-semibold">Last Seen Location:</span>
-              <span className="text-slate-200">{targetCase.lastKnownLocation?.zone}</span>
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs space-y-2">
+            <div className="flex items-center space-x-1.5 text-slate-800">
+              <MapPin className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />
+              <span className="font-bold">Last Seen Location:</span>
+              <span className="text-slate-700">{targetCase.lastKnownLocation?.zone}</span>
             </div>
-            <div className="text-slate-400 pl-5 text-[11px] truncate">
+            <div className="text-slate-500 pl-5 text-[11px] truncate">
               {targetCase.lastKnownLocation?.address}
             </div>
 
-            <div className="flex items-center space-x-2 text-slate-300 pt-1 border-t border-slate-800/60">
-              <Tag className="h-3.5 w-3.5 text-amber-400 flex-shrink-0" />
-              <span className="font-semibold">Clothing:</span>
-              <span className="text-slate-200">{targetCase.person.clothing}</span>
+            <div className="flex items-center space-x-1.5 text-slate-800 pt-1 border-t border-slate-200">
+              <Tag className="h-3.5 w-3.5 text-amber-600 flex-shrink-0" />
+              <span className="font-bold">Clothing:</span>
+              <span className="text-slate-700">{targetCase.person.clothing}</span>
             </div>
 
-            <div className="flex items-center space-x-2 text-slate-300">
-              <HeartPulse className="h-3.5 w-3.5 text-blue-400 flex-shrink-0" />
-              <span className="font-semibold">Medical Needs:</span>
-              <span className="text-slate-200">{targetCase.person.medicalNeeds || 'None specified'}</span>
+            <div className="flex items-center space-x-1.5 text-slate-800">
+              <HeartPulse className="h-3.5 w-3.5 text-blue-600 flex-shrink-0" />
+              <span className="font-bold">Medical:</span>
+              <span className="text-slate-700">{targetCase.person.medicalNeeds || 'None specified'}</span>
             </div>
 
-            <div className="text-slate-400 pl-5 text-[11px]">
-              Distinguishing Marks: <span className="text-slate-300 font-medium">{targetCase.person.identifyingMarks}</span>
+            <div className="text-slate-600 pl-5 text-[11px]">
+              Identifying Marks: <strong className="text-slate-900">{targetCase.person.identifyingMarks}</strong>
             </div>
           </div>
         </div>
 
         {/* RIGHT: Candidate Found / Hospital Intake */}
-        <div className="p-6 space-y-4 bg-slate-900/30">
+        <div className="p-5 space-y-3.5">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
-              <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider bg-emerald-950/60 border border-emerald-500/40 px-2 py-0.5 rounded">
-                HOSPITAL INTAKE RECORD
+              <span className="w-2 h-2 rounded-full bg-emerald-600" />
+              <span className="text-[10px] font-extrabold text-emerald-700 uppercase tracking-wider bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
+                Hospital Intake Record
               </span>
-              <span className="font-mono text-xs text-slate-500">{candidateCase.caseId}</span>
+              <span className="font-mono text-xs text-slate-500 font-bold">{candidateCase.caseId}</span>
             </div>
             <StatusBadge type="status" value={candidateCase.status} />
           </div>
 
-          <div className="flex space-x-4">
-            <div className="relative h-32 w-28 rounded-xl overflow-hidden bg-slate-800 border border-slate-700 flex-shrink-0">
+          <div className="flex space-x-3.5 items-start">
+            <div className="w-24 h-28 rounded-lg overflow-hidden bg-slate-100 border border-slate-200 flex-shrink-0 relative">
               {candidateCase.person.photoUrl ? (
                 <img
                   src={candidateCase.person.photoUrl}
@@ -155,50 +197,59 @@ export const MatchComparisonCard: React.FC<MatchComparisonCardProps> = ({
                   className="h-full w-full object-cover"
                 />
               ) : (
-                <div className="h-full w-full flex items-center justify-center text-slate-500">
-                  <User className="h-10 w-10" />
+                <div className="h-full w-full flex items-center justify-center text-slate-400">
+                  <User className="h-8 w-8" />
                 </div>
               )}
-              <div className="absolute bottom-0 inset-x-0 bg-black/60 backdrop-blur-xs py-0.5 text-center text-[10px] text-slate-300 font-medium">
-                Intake Photo
+              <div className="absolute bottom-0 inset-x-0 bg-black/60 py-0.5 text-center text-[9px] text-white font-bold">
+                Field Intake
               </div>
             </div>
 
-            <div className="space-y-1.5 flex-1 min-w-0">
-              <h3 className="text-lg font-bold text-white truncate">{candidateCase.person.name}</h3>
-              <p className="text-xs text-slate-400">Intake Source: <span className="text-emerald-400 font-semibold">{candidateCase.source}</span></p>
-              <div className="text-xs text-slate-300 space-y-1">
-                <p>Est. Age: <strong className="text-white font-mono">~{candidateCase.person.approximateAge} years</strong> • Gender: <strong className="text-white font-mono">{candidateCase.person.gender}</strong></p>
-                <p className="truncate">Admitted: <span className="text-slate-300 font-mono">2026-09-11 09:10 UTC</span></p>
-                <p className="truncate">Source Trust: <span className="text-emerald-400 font-mono font-bold">98% (Hospital)</span></p>
+            <div className="space-y-1 min-w-0 flex-1">
+              <h3 className="text-base font-extrabold text-slate-900 truncate">{candidateCase.person.name}</h3>
+              <p className="text-[11px] text-slate-500">
+                Source: <span className="text-emerald-700 font-bold">{candidateCase.source}</span>
+              </p>
+              <div className="text-xs text-slate-600 space-y-0.5 pt-0.5">
+                <p>
+                  Est. Age: <strong className="text-slate-900">~{candidateCase.person.approximateAge} years</strong> •
+                  Gender: <strong className="text-slate-900">{candidateCase.person.gender}</strong>
+                </p>
+                <p className="truncate">
+                  Admitted: <span className="text-slate-700 font-mono">2026-09-11 09:10 UTC</span>
+                </p>
+                <p className="truncate font-mono text-[11px]">
+                  Trust Score: <span className="text-emerald-700 font-bold">98% (Hospital Desk)</span>
+                </p>
               </div>
             </div>
           </div>
 
-          <div className="bg-slate-900/80 border border-slate-800/80 rounded-xl p-3 text-xs space-y-2">
-            <div className="flex items-center space-x-2 text-slate-300">
-              <MapPin className="h-3.5 w-3.5 text-emerald-400 flex-shrink-0" />
-              <span className="font-semibold">Found/Admitted At:</span>
-              <span className="text-slate-200">{candidateCase.lastKnownLocation?.zone}</span>
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs space-y-2">
+            <div className="flex items-center space-x-1.5 text-slate-800">
+              <MapPin className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0" />
+              <span className="font-bold">Admitted Location:</span>
+              <span className="text-slate-700">{candidateCase.lastKnownLocation?.zone}</span>
             </div>
-            <div className="text-slate-400 pl-5 text-[11px] truncate">
+            <div className="text-slate-500 pl-5 text-[11px] truncate">
               {candidateCase.lastKnownLocation?.address}
             </div>
 
-            <div className="flex items-center space-x-2 text-slate-300 pt-1 border-t border-slate-800/60">
-              <Tag className="h-3.5 w-3.5 text-amber-400 flex-shrink-0" />
-              <span className="font-semibold">Clothing Observed:</span>
-              <span className="text-slate-200">{candidateCase.person.clothing}</span>
+            <div className="flex items-center space-x-1.5 text-slate-800 pt-1 border-t border-slate-200">
+              <Tag className="h-3.5 w-3.5 text-amber-600 flex-shrink-0" />
+              <span className="font-bold">Clothing Observed:</span>
+              <span className="text-slate-700">{candidateCase.person.clothing}</span>
             </div>
 
-            <div className="flex items-center space-x-2 text-slate-300">
-              <HeartPulse className="h-3.5 w-3.5 text-blue-400 flex-shrink-0" />
-              <span className="font-semibold">Medical Condition:</span>
-              <span className="text-slate-200">{candidateCase.person.medicalNeeds}</span>
+            <div className="flex items-center space-x-1.5 text-slate-800">
+              <HeartPulse className="h-3.5 w-3.5 text-blue-600 flex-shrink-0" />
+              <span className="font-bold">Medical Condition:</span>
+              <span className="text-slate-700">{candidateCase.person.medicalNeeds}</span>
             </div>
 
-            <div className="text-slate-400 pl-5 text-[11px]">
-              Observed Marks: <span className="text-slate-300 font-medium">{candidateCase.person.identifyingMarks}</span>
+            <div className="text-slate-600 pl-5 text-[11px]">
+              Observed Marks: <strong className="text-slate-900">{candidateCase.person.identifyingMarks}</strong>
             </div>
           </div>
         </div>
@@ -206,7 +257,7 @@ export const MatchComparisonCard: React.FC<MatchComparisonCardProps> = ({
 
       {/* Explainable AI Score Breakdown */}
       {showFullDetails && (
-        <div className="p-6 border-t border-slate-800 bg-[#0B1120]">
+        <div className="p-5 border-t border-slate-200 bg-slate-50/50">
           <ScoreBreakdownBar
             breakdown={match.breakdown}
             reasons={match.reasons}
@@ -215,28 +266,28 @@ export const MatchComparisonCard: React.FC<MatchComparisonCardProps> = ({
         </div>
       )}
 
-      {/* Action Footer for Human Reviewer */}
-      <div className="bg-slate-900/90 border-t border-slate-800 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
-        <div className="text-xs text-slate-400 flex items-center space-x-2">
-          <Clock className="h-3.5 w-3.5 text-slate-500" />
-          <span>Candidate generated 18 minutes ago • Awaiting Human Authorization</span>
+      {/* Action Footer */}
+      <div className="bg-slate-50 px-5 py-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3">
+        <div className="text-xs text-slate-500 flex items-center space-x-1.5">
+          <Clock className="h-3.5 w-3.5 text-slate-400" />
+          <span>Generated 18m ago • Requires Responder Authorization</span>
         </div>
 
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-2">
           <button
             onClick={() => onReject(match.matchId, 'Ruchit Gaurh (Lead)')}
-            className="px-4 py-2 text-xs font-semibold text-rose-400 hover:text-rose-300 bg-rose-950/40 hover:bg-rose-900/50 border border-rose-800/50 rounded-lg transition-all flex items-center space-x-1.5"
+            className="px-3 py-1.5 text-xs font-bold text-slate-700 hover:text-red-700 bg-white hover:bg-red-50 border border-slate-300 hover:border-red-300 rounded-lg transition-colors flex items-center space-x-1"
           >
-            <XCircle className="h-4 w-4" />
+            <XCircle className="h-3.5 w-3.5" />
             <span>Reject Match</span>
           </button>
 
           <button
             onClick={() => setIsModalOpen(true)}
-            className="px-6 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg shadow-lg shadow-emerald-600/30 transition-all flex items-center space-x-2"
+            className="px-4 py-1.5 text-xs font-black text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-xs transition-colors flex items-center space-x-1.5"
           >
-            <ShieldCheck className="h-4 w-4" />
-            <span>Review & Verify Identity</span>
+            <ShieldCheck className="h-3.5 w-3.5" />
+            <span>Review & Confirm Identity</span>
           </button>
         </div>
       </div>

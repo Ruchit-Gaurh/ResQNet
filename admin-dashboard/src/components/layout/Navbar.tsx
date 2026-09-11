@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Radio, ShieldAlert, Database, RefreshCw, UserCheck } from 'lucide-react';
+import { Radio, RefreshCw, Bell, User, Server, Wifi, AlertTriangle, ShieldCheck, Download, Share2, Bookmark, MoreVertical, Maximize2 } from 'lucide-react';
 import { apiService } from '../../services/api';
 
 interface NavbarProps {
@@ -8,7 +8,7 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({ onRefresh }) => {
   const [isLive, setIsLive] = useState(apiService.isLive());
-  const [activeAlert] = useState('CRITICAL: Flood Surge in Zone A — Mesh Relays Prioritized');
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
     return apiService.subscribe(() => {
@@ -18,86 +18,86 @@ export const Navbar: React.FC<NavbarProps> = ({ onRefresh }) => {
 
   const toggleBackendMode = () => {
     apiService.setMode(!isLive);
+    if (onRefresh) onRefresh();
+  };
+
+  const handleRefresh = () => {
+    setIsRefreshing(true);
+    if (onRefresh) onRefresh();
+    setTimeout(() => setIsRefreshing(false), 500);
   };
 
   return (
-    <header className="sticky top-0 z-40 bg-[#0F172A]/95 backdrop-blur border-b border-slate-800 px-6 py-3">
-      <div className="flex items-center justify-between">
-        {/* Left: Brand & Emergency Tag */}
-        <div className="flex items-center space-x-4">
-          <div className="flex items-center space-x-2.5">
-            <div className="h-9 w-9 rounded-lg bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
-              <Radio className="h-5 w-5 text-white animate-pulse" />
-            </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <span className="font-extrabold text-lg tracking-wider text-white">RESQNET</span>
-                <span className="text-[10px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-blue-900/60 text-blue-300 border border-blue-700/50">
-                  COMMAND CENTER
-                </span>
-              </div>
-              <p className="text-xs text-slate-400">Offline-First Disaster Coordination</p>
-            </div>
-          </div>
-
-          <div className="hidden lg:flex items-center space-x-2 bg-red-950/40 border border-red-500/30 rounded-md px-3 py-1 text-xs text-red-300">
-            <ShieldAlert className="h-3.5 w-3.5 text-red-400 flex-shrink-0" />
-            <span className="truncate max-w-xs">{activeAlert}</span>
-          </div>
+    <header className="bg-[#1e293b] text-slate-200 border-b border-slate-700/80 px-4 py-2 flex items-center justify-between shadow-md select-none">
+      {/* Left: macOS Window Controls & User Identity */}
+      <div className="flex items-center gap-3">
+        {/* macOS Window dots */}
+        <div className="flex items-center gap-1.5 mr-2">
+          <span className="w-3 h-3 rounded-full bg-[#ff5f56] border border-[#e0443e] cursor-pointer" />
+          <span className="w-3 h-3 rounded-full bg-[#ffbd2e] border border-[#dea123] cursor-pointer" />
+          <span className="w-3 h-3 rounded-full bg-[#27c93f] border border-[#1aab29] cursor-pointer" />
         </div>
 
-        {/* Right: Connectivity Status & Controls */}
-        <div className="flex items-center space-x-3">
-          {/* Dual Mode Switcher */}
-          <button
-            onClick={toggleBackendMode}
-            className={`flex items-center space-x-1.5 text-xs px-2.5 py-1.5 rounded-md border transition-colors ${
-              isLive
-                ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/50'
-                : 'bg-slate-800/80 border-slate-700 text-slate-300 hover:bg-slate-700/80'
-            }`}
-            title="Toggle between mock seed data and live PostgreSQL backend"
-          >
-            <Database className="h-3.5 w-3.5" />
-            <span>{isLive ? 'Live API (Port 4000)' : 'Mock Demo Mode'}</span>
-          </button>
-
-          {/* Network Health Indicator */}
-          <div className="hidden sm:flex items-center space-x-2 bg-slate-900/90 border border-slate-800 rounded-md px-3 py-1.5 text-xs">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-            </span>
-            <span className="text-slate-300 font-medium">Mesh Connected</span>
-            <span className="text-slate-500">|</span>
-            <span className="text-blue-400 font-mono">18 Nodes</span>
+        {/* User Avatar + Tag */}
+        <div className="flex items-center gap-2 border-l border-slate-700 pl-3">
+          <div className="w-6 h-6 rounded-full bg-blue-600 text-white font-bold text-[10px] flex items-center justify-center shadow-xs">
+            RG
           </div>
-
-          {/* Reset / Refresh */}
-          {onRefresh && (
-            <button
-              onClick={onRefresh}
-              className="p-1.5 text-slate-400 hover:text-white rounded-md hover:bg-slate-800 transition-colors"
-              title="Refresh Dashboard Data"
-            >
-              <RefreshCw className="h-4 w-4" />
-            </button>
-          )}
-
-          {/* Operator Profile */}
-          <div className="flex items-center space-x-2 pl-2 border-l border-slate-800">
-            <div className="h-8 w-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-blue-400 font-bold text-xs">
-              RG
-            </div>
-            <div className="hidden md:block text-left">
-              <div className="text-xs font-semibold text-slate-200">Ruchit Gaurh</div>
-              <div className="text-[10px] text-emerald-400 font-mono flex items-center space-x-1">
-                <UserCheck className="h-2.5 w-2.5" />
-                <span>Lead Responder / Tech Lead</span>
-              </div>
-            </div>
+          <div className="text-xs">
+            <span className="font-semibold text-white">Ruchit Gaurh</span>
+            <span className="text-[10px] text-slate-400 ml-1.5 font-mono">Lead Tech • SIH 2026</span>
           </div>
         </div>
+      </div>
+
+      {/* Center: Window Title Banner matching user reference */}
+      <div className="hidden md:flex items-center gap-2 text-xs font-bold tracking-wide text-slate-100">
+        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+        <span>ResQNet — Disaster Missing-Person Coordination & Tactical Command Center | SIH 2026</span>
+      </div>
+
+      {/* Right: Actions & Connectivity Status */}
+      <div className="flex items-center gap-2.5 text-xs">
+        {/* Dual Mode Switcher */}
+        <button
+          onClick={toggleBackendMode}
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-bold border transition-colors ${
+            isLive
+              ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300'
+              : 'bg-slate-800 border-slate-600 text-slate-300 hover:bg-slate-700'
+          }`}
+          title="Toggle Mock vs Live Backend"
+        >
+          <Server size={12} />
+          <span>{isLive ? 'Live API (4000)' : 'Mock Engine'}</span>
+        </button>
+
+        {/* Mesh Status */}
+        <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-800/80 border border-slate-700 text-slate-300 text-[11px]">
+          <Wifi size={12} className="text-emerald-400" />
+          <span>BLE P2P: <strong>18 Relays</strong></span>
+        </div>
+
+        {/* Refresh */}
+        <button
+          onClick={handleRefresh}
+          className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800 transition-colors"
+          title="Refresh Telemetry"
+        >
+          <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
+        </button>
+
+        <button className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800 transition-colors" title="Export Situation Report">
+          <Download size={14} />
+        </button>
+
+        <button className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800 transition-colors" title="Share Dispatch">
+          <Share2 size={14} />
+        </button>
+
+        <button className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800 transition-colors">
+          <MoreVertical size={14} />
+        </button>
       </div>
     </header>
   );

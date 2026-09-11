@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { MatchCandidate, DisasterCase } from '../types';
 import { MatchComparisonCard } from '../components/verification/MatchComparisonCard';
-import { UserCheck, ShieldAlert, CheckCircle2 } from 'lucide-react';
+import { UserCheck, ShieldAlert, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface VerificationQueueProps {
   matches: MatchCandidate[];
@@ -18,6 +18,7 @@ export const VerificationQueue: React.FC<VerificationQueueProps> = ({
 }) => {
   const pendingMatches = matches.filter((m) => m.status === 'PENDING_REVIEW');
   const [filterConfidence, setFilterConfidence] = useState<string>('ALL');
+  const [showSop, setShowSop] = useState(true);
 
   const filteredMatches = pendingMatches.filter((m) => {
     if (filterConfidence === 'ALL') return true;
@@ -25,36 +26,33 @@ export const VerificationQueue: React.FC<VerificationQueueProps> = ({
   });
 
   return (
-    <div className="space-y-6">
-      {/* Header Banner */}
-      <div className="bg-[#0F172A] border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-wrap items-center justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center space-x-3">
-            <div className="h-10 w-10 rounded-xl bg-amber-600/20 border border-amber-500/40 flex items-center justify-center">
-              <UserCheck className="h-6 w-6 text-amber-400" />
-            </div>
-            <div>
-              <h2 className="text-lg font-bold text-white tracking-wide">
-                Human Verification Queue
-              </h2>
-              <p className="text-xs text-slate-400">
-                AI algorithm suggests candidate correlations. Authorized responders must review evidence before confirming.
-              </p>
-            </div>
+    <div className="space-y-4">
+      {/* Top Banner Control */}
+      <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="flex items-center space-x-3">
+          <div className="h-10 w-10 rounded-lg bg-blue-50 border border-blue-200 flex items-center justify-center">
+            <UserCheck className="h-5 w-5 text-blue-600" />
+          </div>
+          <div>
+            <h2 className="text-base font-extrabold text-slate-900 tracking-tight">
+              Human-in-the-Loop Verification Queue
+            </h2>
+            <p className="text-xs text-slate-500">
+              AI correlation suggests identity matches • Authorized responders verify evidence before dispatching P2P confirm packet
+            </p>
           </div>
         </div>
 
         {/* Confidence Filter Pills */}
-        <div className="flex items-center space-x-2 text-xs">
-          <span className="text-slate-400 font-semibold">Filter:</span>
+        <div className="flex items-center space-x-2">
           {['ALL', 'STRONG_CANDIDATE', 'POSSIBLE_MATCH'].map((conf) => (
             <button
               key={conf}
               onClick={() => setFilterConfidence(conf)}
-              className={`px-3 py-1.5 rounded-lg transition-all ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                 filterConfidence === conf
-                  ? 'bg-blue-600 text-white font-bold shadow-md shadow-blue-500/20'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
               {conf === 'ALL' ? 'All Candidates' : conf.replace('_', ' ')}
@@ -63,31 +61,48 @@ export const VerificationQueue: React.FC<VerificationQueueProps> = ({
         </div>
       </div>
 
-      {/* Mandatory Protocol Alert */}
-      <div className="bg-blue-950/40 border border-blue-500/30 rounded-xl p-4 text-xs text-blue-300 flex items-start space-x-3">
-        <ShieldAlert className="h-5 w-5 text-blue-400 flex-shrink-0 mt-0.5" />
-        <div className="space-y-1">
-          <p className="font-bold text-white">Disaster Verification Standard Operating Procedure (SOP):</p>
-          <p className="text-blue-200/90 leading-relaxed">
-            1. Cross-reference name spelling, phonetic variations, and language transliterations.
-            2. Correlate clothing descriptions with intake notes from field hospitals and relief camps.
-            3. Upon clicking <strong>[ Review & Verify Identity ]</strong>, select the evidence items physically checked.
-            4. Once confirmed, an encrypted update packet is dispatched across the mesh to the family's device.
-          </p>
-        </div>
+      {/* Mandatory Protocol Alert - Collapsible */}
+      <div className="bg-blue-50/70 border border-blue-200 rounded-xl overflow-hidden shadow-xs">
+        <button
+          onClick={() => setShowSop(!showSop)}
+          className="w-full px-4 py-2.5 flex items-center justify-between text-left hover:bg-blue-100/50 transition-colors"
+        >
+          <div className="flex items-center space-x-2 text-xs text-blue-950 font-bold">
+            <ShieldAlert className="h-4 w-4 text-blue-600 flex-shrink-0" />
+            <span>Disaster Verification Standard Operating Procedure (SOP)</span>
+          </div>
+          {showSop ? (
+            <ChevronUp className="h-4 w-4 text-blue-600" />
+          ) : (
+            <ChevronDown className="h-4 w-4 text-blue-600" />
+          )}
+        </button>
+
+        {showSop && (
+          <div className="px-4 pb-3 pt-1 text-xs text-blue-900 border-t border-blue-200/60 space-y-1">
+            <p>1. Cross-reference name spelling, phonetic variations, and language transliterations (RapidFuzz token score).</p>
+            <p>2. Correlate clothing descriptions with intake notes from field hospitals and relief camps.</p>
+            <p>3. Upon clicking <strong>[ Review & Confirm Identity ]</strong>, check off the physical evidence examined.</p>
+            <p>4. Once confirmed, an encrypted Ed25519 update packet is dispatched across the mesh to the family.</p>
+          </div>
+        )}
       </div>
 
       {/* Candidate Cards List */}
       {filteredMatches.length === 0 ? (
-        <div className="bg-[#0F172A] border border-slate-800 rounded-2xl p-12 text-center space-y-3">
-          <CheckCircle2 className="h-12 w-12 text-emerald-400 mx-auto" />
-          <h3 className="text-base font-bold text-white">Verification Queue Clear</h3>
-          <p className="text-xs text-slate-400 max-w-md mx-auto">
-            All pending AI identity match candidates have been reviewed and processed by responders.
-          </p>
+        <div className="py-12 bg-white border border-slate-200 rounded-xl text-center space-y-3">
+          <div className="mx-auto h-12 w-12 rounded-full bg-emerald-50 flex items-center justify-center">
+            <CheckCircle2 className="h-6 w-6 text-emerald-600" />
+          </div>
+          <div>
+            <h3 className="text-base font-bold text-slate-900">Verification Queue Clear</h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              All pending identity match candidates have been processed and confirmed.
+            </p>
+          </div>
         </div>
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-4">
           {filteredMatches.map((match) => {
             const targetCase = cases.find((c) => c.caseId === match.targetMissingCaseId);
             const candidateCase = cases.find((c) => c.caseId === match.candidateFoundCaseId);

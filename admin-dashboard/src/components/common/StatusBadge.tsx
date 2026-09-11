@@ -7,88 +7,113 @@ interface StatusBadgeProps {
 }
 
 export const StatusBadge: React.FC<StatusBadgeProps> = ({ type, value }) => {
-  let colorClasses = 'bg-slate-700 text-slate-200 border-slate-600';
+  let bgClass = 'bg-slate-100 border-slate-300 text-slate-700';
+  let dotClass = 'bg-slate-500';
 
   if (type === 'status') {
     switch (value as CaseStatus) {
       case 'VERIFIED':
       case 'REUNITED':
-        colorClasses = 'bg-emerald-950/80 text-emerald-300 border-emerald-500/50';
+        bgClass = 'bg-emerald-50 border-emerald-200 text-emerald-800';
+        dotClass = 'bg-emerald-600';
         break;
       case 'SEARCHING':
-        colorClasses = 'bg-amber-950/80 text-amber-300 border-amber-500/50';
+        bgClass = 'bg-amber-50 border-amber-200 text-amber-800';
+        dotClass = 'bg-amber-600';
         break;
       case 'INFORMATION_RECEIVED':
       case 'POSSIBLE_MATCH':
-        colorClasses = 'bg-blue-950/80 text-blue-300 border-blue-500/50';
+        bgClass = 'bg-blue-50 border-blue-200 text-blue-800';
+        dotClass = 'bg-blue-600';
         break;
       case 'UNDER_VERIFICATION':
-        colorClasses = 'bg-purple-950/80 text-purple-300 border-purple-500/50';
+        bgClass = 'bg-purple-50 border-purple-200 text-purple-800';
+        dotClass = 'bg-purple-600';
         break;
       case 'DUPLICATE':
       case 'REJECTED':
       case 'CLOSED':
-        colorClasses = 'bg-slate-800 text-slate-400 border-slate-700';
+        bgClass = 'bg-slate-100 border-slate-200 text-slate-600';
+        dotClass = 'bg-slate-400';
         break;
     }
   } else if (type === 'priority') {
     switch (value as PriorityLevel) {
       case 'CRITICAL':
-        colorClasses = 'bg-red-950/80 text-red-300 border-red-500/60 animate-pulse-subtle';
+        bgClass = 'bg-red-100 border-red-300 text-red-800 font-bold';
+        dotClass = 'bg-red-600 animate-pulse';
         break;
       case 'HIGH':
-        colorClasses = 'bg-amber-950/80 text-amber-300 border-amber-500/50';
+        bgClass = 'bg-amber-100 border-amber-300 text-amber-800 font-semibold';
+        dotClass = 'bg-amber-600';
         break;
       case 'NORMAL':
-        colorClasses = 'bg-blue-950/80 text-blue-300 border-blue-500/50';
+        bgClass = 'bg-blue-50 border-blue-200 text-blue-800';
+        dotClass = 'bg-blue-600';
         break;
       case 'LOW':
-        colorClasses = 'bg-slate-800 text-slate-400 border-slate-700';
+        bgClass = 'bg-slate-100 border-slate-200 text-slate-600';
+        dotClass = 'bg-slate-400';
         break;
     }
   } else if (type === 'verification') {
     switch (value as VerificationState) {
       case 'VERIFIED':
-        colorClasses = 'bg-emerald-950/80 text-emerald-300 border-emerald-500/50';
+        bgClass = 'bg-emerald-50 border-emerald-300 text-emerald-800 font-bold';
+        dotClass = 'bg-emerald-600';
         break;
       case 'CORROBORATED':
-        colorClasses = 'bg-cyan-950/80 text-cyan-300 border-cyan-500/50';
+        bgClass = 'bg-sky-50 border-sky-200 text-sky-800 font-semibold';
+        dotClass = 'bg-sky-600';
         break;
       case 'UNDER_REVIEW':
-        colorClasses = 'bg-purple-950/80 text-purple-300 border-purple-500/50';
+        bgClass = 'bg-purple-50 border-purple-200 text-purple-800';
+        dotClass = 'bg-purple-600';
         break;
       case 'UNVERIFIED':
-        colorClasses = 'bg-amber-950/80 text-amber-300 border-amber-500/50';
+        bgClass = 'bg-amber-50 border-amber-200 text-amber-800';
+        dotClass = 'bg-amber-600';
         break;
       case 'REJECTED':
-        colorClasses = 'bg-rose-950/80 text-rose-300 border-rose-500/50';
+        bgClass = 'bg-red-50 border-red-200 text-red-800';
+        dotClass = 'bg-red-600';
         break;
     }
   } else if (type === 'confidence') {
     switch (value as MatchConfidenceLevel) {
       case 'HUMAN_VERIFIED':
-        colorClasses = 'bg-emerald-950/80 text-emerald-300 border-emerald-500/50';
+        bgClass = 'bg-emerald-100 border-emerald-300 text-emerald-800 font-bold';
+        dotClass = 'bg-emerald-600';
         break;
       case 'STRONG_CANDIDATE':
-        colorClasses = 'bg-blue-950/80 text-blue-300 border-blue-500/60 font-semibold';
+        bgClass = 'bg-blue-100 border-blue-300 text-blue-800 font-bold';
+        dotClass = 'bg-blue-600';
         break;
       case 'POSSIBLE_MATCH':
-        colorClasses = 'bg-amber-950/80 text-amber-300 border-amber-500/50';
+        bgClass = 'bg-amber-50 border-amber-200 text-amber-800 font-semibold';
+        dotClass = 'bg-amber-600';
         break;
       case 'WEAK_CANDIDATE':
       case 'NO_MATCH':
-        colorClasses = 'bg-slate-800 text-slate-400 border-slate-700';
+        bgClass = 'bg-slate-100 border-slate-200 text-slate-600';
+        dotClass = 'bg-slate-400';
         break;
     }
   }
 
-  const formatText = (txt: string) => txt.replace(/_/g, ' ');
+  const formatText = (txt: string) => {
+    return txt
+      .split('_')
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(' ');
+  };
 
   return (
     <span
-      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border tracking-wide uppercase ${colorClasses}`}
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] border shadow-xs tracking-tight ${bgClass}`}
     >
-      {formatText(value)}
+      <span className={`w-1.5 h-1.5 rounded-full ${dotClass}`} />
+      <span>{formatText(value)}</span>
     </span>
   );
 };

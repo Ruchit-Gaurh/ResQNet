@@ -349,3 +349,102 @@ export const INITIAL_AUDIT_LOGS: VerificationAuditEntry[] = [
     evidenceItems: ['EVID-PHOTO-01', 'EVID-ID-CARD']
   }
 ];
+
+export const INITIAL_PHONE_CLUSTERS: import('../types').PhoneMeshCluster[] = [
+  {
+    clusterId: 'CLUSTER-A-CITIZENS',
+    name: 'Zone A Riverfront — Stranded Citizens Phone Mesh',
+    zone: 'Zone A',
+    lat: 28.6130,
+    lng: 77.2085,
+    phoneCount: 8,
+    role: 'CITIZEN_CLUSTER',
+    avgBattery: 74,
+    totalPackets: 12,
+    hopDistanceToGateway: 3,
+    devices: [
+      { id: 'PH-A01', model: 'Samsung Galaxy M34', ownerType: 'FAMILY', battery: 78, packetsInQueue: 3, signalRssi: -62, lastHopTime: '1m ago' },
+      { id: 'PH-A02', model: 'Redmi Note 12 5G', ownerType: 'FAMILY', battery: 65, packetsInQueue: 2, signalRssi: -71, lastHopTime: '3m ago' },
+      { id: 'PH-A03', model: 'OnePlus Nord CE 3', ownerType: 'FAMILY', battery: 82, packetsInQueue: 1, signalRssi: -58, lastHopTime: '45s ago' },
+      { id: 'PH-A04', model: 'Realme Narzo 60', ownerType: 'FAMILY', battery: 59, packetsInQueue: 4, signalRssi: -77, lastHopTime: '2m ago' },
+      { id: 'PH-A05', model: 'Vivo T2x', ownerType: 'DISPLACED', battery: 91, packetsInQueue: 0, signalRssi: -64, lastHopTime: 'Just now' },
+      { id: 'PH-A06', model: 'POCO X5 Pro', ownerType: 'FAMILY', battery: 73, packetsInQueue: 1, signalRssi: -69, lastHopTime: '5m ago' },
+      { id: 'PH-A07', model: 'Motorola G54', ownerType: 'DISPLACED', battery: 68, packetsInQueue: 1, signalRssi: -73, lastHopTime: '1m ago' },
+      { id: 'PH-A08', model: 'iPhone 13', ownerType: 'FAMILY', battery: 80, packetsInQueue: 0, signalRssi: -60, lastHopTime: '30s ago' }
+    ]
+  },
+  {
+    clusterId: 'CLUSTER-COURIER-MULES',
+    name: 'Sector A-B Corridor — Volunteer Courier Mules',
+    zone: 'Zone B',
+    lat: 28.6165,
+    lng: 77.2120,
+    phoneCount: 5,
+    role: 'COURIER_MULES',
+    avgBattery: 68,
+    totalPackets: 8,
+    hopDistanceToGateway: 2,
+    devices: [
+      { id: 'PH-B01', model: 'OnePlus 11R', ownerType: 'VOLUNTEER', battery: 72, packetsInQueue: 3, signalRssi: -55, lastHopTime: 'Just now' },
+      { id: 'PH-B02', model: 'Samsung Galaxy A54', ownerType: 'VOLUNTEER', battery: 64, packetsInQueue: 2, signalRssi: -60, lastHopTime: '40s ago' },
+      { id: 'PH-B03', model: 'iQOO Z7 Pro', ownerType: 'VOLUNTEER', battery: 81, packetsInQueue: 1, signalRssi: -63, lastHopTime: '1m ago' },
+      { id: 'PH-B04', model: 'Pixel 7a', ownerType: 'VOLUNTEER', battery: 55, packetsInQueue: 2, signalRssi: -72, lastHopTime: '2m ago' },
+      { id: 'PH-B05', model: 'Redmi K50i', ownerType: 'VOLUNTEER', battery: 70, packetsInQueue: 0, signalRssi: -58, lastHopTime: '30s ago' }
+    ]
+  },
+  {
+    clusterId: 'CLUSTER-CAMP-1',
+    name: 'Relief Camp #1 Station — Displaced Families Mesh',
+    zone: 'Zone A',
+    lat: 28.6145,
+    lng: 77.2110,
+    phoneCount: 14,
+    role: 'CAMP_AGGREGATOR',
+    avgBattery: 86,
+    totalPackets: 19,
+    hopDistanceToGateway: 2,
+    devices: [
+      { id: 'PH-C01', model: 'Redmi Note 11', ownerType: 'DISPLACED', battery: 88, packetsInQueue: 2, signalRssi: -52, lastHopTime: 'Just now' },
+      { id: 'PH-C02', model: 'Samsung Galaxy F14', ownerType: 'DISPLACED', battery: 92, packetsInQueue: 3, signalRssi: -48, lastHopTime: 'Just now' },
+      { id: 'PH-C03', model: 'Vivo Y200', ownerType: 'DISPLACED', battery: 79, packetsInQueue: 1, signalRssi: -66, lastHopTime: '2m ago' },
+      { id: 'PH-C04', model: 'Realme 11 Pro', ownerType: 'DISPLACED', battery: 85, packetsInQueue: 4, signalRssi: -54, lastHopTime: '1m ago' },
+      { id: 'PH-C05', model: 'iPhone 12', ownerType: 'DISPLACED', battery: 94, packetsInQueue: 2, signalRssi: -50, lastHopTime: '30s ago' }
+    ]
+  },
+  {
+    clusterId: 'CLUSTER-HOSPITAL-MEDICS',
+    name: 'Zone B Trauma Center — Medical Intake Mesh',
+    zone: 'Zone B',
+    lat: 28.6195,
+    lng: 77.2165,
+    phoneCount: 6,
+    role: 'MEDIC_FIELD',
+    avgBattery: 91,
+    totalPackets: 5,
+    hopDistanceToGateway: 1,
+    devices: [
+      { id: 'PH-M01', model: 'Samsung Galaxy Tab S8', ownerType: 'MEDIC', battery: 95, packetsInQueue: 2, signalRssi: -42, lastHopTime: 'Just now' },
+      { id: 'PH-M02', model: 'Pixel 8', ownerType: 'MEDIC', battery: 88, packetsInQueue: 1, signalRssi: -46, lastHopTime: '15s ago' },
+      { id: 'PH-M03', model: 'iPad Air 5th Gen', ownerType: 'MEDIC', battery: 92, packetsInQueue: 1, signalRssi: -40, lastHopTime: 'Just now' },
+      { id: 'PH-M04', model: 'OnePlus 10 Pro', ownerType: 'MEDIC', battery: 89, packetsInQueue: 1, signalRssi: -50, lastHopTime: '1m ago' }
+    ]
+  },
+  {
+    clusterId: 'CLUSTER-SEARCH-TEAM',
+    name: 'Sector 9 Collapse — Canine & Search Rescue Mesh',
+    zone: 'Zone C',
+    lat: 28.6080,
+    lng: 77.2260,
+    phoneCount: 4,
+    role: 'SEARCH_TEAM',
+    avgBattery: 79,
+    totalPackets: 6,
+    hopDistanceToGateway: 2,
+    devices: [
+      { id: 'PH-S01', model: 'Cat S62 Pro (Rugged Thermal)', ownerType: 'SEARCH_TEAM', battery: 84, packetsInQueue: 2, signalRssi: -59, lastHopTime: 'Just now' },
+      { id: 'PH-S02', model: 'Ulefone Armor 21', ownerType: 'SEARCH_TEAM', battery: 76, packetsInQueue: 2, signalRssi: -64, lastHopTime: '45s ago' },
+      { id: 'PH-S03', model: 'Samsung Galaxy XCover 6', ownerType: 'SEARCH_TEAM', battery: 82, packetsInQueue: 1, signalRssi: -61, lastHopTime: '2m ago' },
+      { id: 'PH-S04', model: 'Blackview BV9900', ownerType: 'SEARCH_TEAM', battery: 74, packetsInQueue: 1, signalRssi: -68, lastHopTime: '1m ago' }
+    ]
+  }
+];

@@ -37,6 +37,30 @@ export interface MeshNodeStatus {
   isOnlineGateway: boolean;
 }
 
+export interface PhoneDeviceInfo {
+  id: string;
+  model: string;
+  ownerType: 'FAMILY' | 'VOLUNTEER' | 'MEDIC' | 'SEARCH_TEAM' | 'DISPLACED';
+  battery: number;
+  packetsInQueue: number;
+  signalRssi: number;
+  lastHopTime: string;
+}
+
+export interface PhoneMeshCluster {
+  clusterId: string;
+  name: string;
+  zone: string;
+  lat: number;
+  lng: number;
+  phoneCount: number;
+  role: 'CITIZEN_CLUSTER' | 'COURIER_MULES' | 'CAMP_AGGREGATOR' | 'MEDIC_FIELD' | 'SEARCH_TEAM' | 'STARLINK_GATEWAY';
+  avgBattery: number;
+  totalPackets: number;
+  hopDistanceToGateway: number;
+  devices: PhoneDeviceInfo[];
+}
+
 export interface VerificationAuditEntry {
   id: string;
   matchId: string;

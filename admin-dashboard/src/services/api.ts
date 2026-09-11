@@ -1,5 +1,5 @@
-import { DisasterCase, MatchCandidate, DisasterZone, FacilityLocation, MeshNodeStatus, VerificationAuditEntry } from '../types';
-import { INITIAL_CASES, INITIAL_MATCHES, INITIAL_ZONES, INITIAL_FACILITIES, INITIAL_MESH_NODES, INITIAL_AUDIT_LOGS } from './mockData';
+import { DisasterCase, MatchCandidate, DisasterZone, FacilityLocation, MeshNodeStatus, VerificationAuditEntry, PhoneMeshCluster } from '../types';
+import { INITIAL_CASES, INITIAL_MATCHES, INITIAL_ZONES, INITIAL_FACILITIES, INITIAL_MESH_NODES, INITIAL_AUDIT_LOGS, INITIAL_PHONE_CLUSTERS } from './mockData';
 
 type Listener = () => void;
 
@@ -246,6 +246,10 @@ class ApiService {
 
   public async getAuditLogs(): Promise<VerificationAuditEntry[]> {
     return this.auditLogs;
+  }
+
+  public async getPhoneClusters(): Promise<PhoneMeshCluster[]> {
+    return INITIAL_PHONE_CLUSTERS;
   }
 
   public resetMockData() {

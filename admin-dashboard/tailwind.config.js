@@ -4,20 +4,19 @@ export default {
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
-  darkMode: 'class',
   theme: {
     extend: {
       colors: {
         brand: {
-          dark: '#0B1120',
-          card: '#111827',
-          surface: '#1E293B',
-          border: '#334155',
-          accent: '#2563EB',
-          critical: '#DC2626',
-          warning: '#F59E0B',
-          success: '#10B981',
-          mesh: '#38BDF8'
+          dark: '#0f172a',
+          card: '#ffffff',
+          surface: '#f8fafc',
+          border: '#e2e8f0',
+          accent: '#2563eb',
+          critical: '#dc2626',
+          warning: '#d97706',
+          success: '#16a34a',
+          mesh: '#0284c7'
         }
       },
       fontFamily: {

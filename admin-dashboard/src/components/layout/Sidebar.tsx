@@ -22,117 +22,73 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectTab,
   pendingMatchesCount
 }) => {
-  const navItems = [
-    {
-      id: 'overview' as NavTab,
-      label: 'Command Overview',
-      icon: LayoutDashboard,
-      badge: null
-    },
-    {
-      id: 'verification' as NavTab,
-      label: 'Verification Queue',
-      icon: UserCheck,
-      badge: pendingMatchesCount > 0 ? pendingMatchesCount : null,
-      badgeColor: 'bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse'
-    },
-    {
-      id: 'duplicates' as NavTab,
-      label: 'Duplicate Consolidation',
-      icon: CopyX,
-      badge: null
-    },
-    {
-      id: 'map' as NavTab,
-      label: 'Disaster Map (Privacy)',
-      icon: MapPin,
-      badge: null
-    },
-    {
-      id: 'network' as NavTab,
-      label: 'Mesh Network & Hops',
-      icon: Share2,
-      badge: null
-    },
-    {
-      id: 'demo' as NavTab,
-      label: '5-Min Golden Demo',
-      icon: Rocket,
-      highlight: true
-    }
+  const navItems: { id: NavTab; label: string; icon: React.ElementType; highlight?: boolean }[] = [
+    { id: 'overview', label: 'Command Overview', icon: LayoutDashboard },
+    { id: 'verification', label: 'Verification Queue', icon: UserCheck },
+    { id: 'duplicates', label: 'Duplicate Cases', icon: CopyX },
+    { id: 'map', label: 'Disaster Map', icon: MapPin },
+    { id: 'network', label: 'Mesh Network', icon: Share2 },
+    { id: 'demo', label: '5-Min Golden Demo', icon: Rocket, highlight: true }
   ];
 
   return (
-    <aside className="w-64 bg-[#0F172A] border-r border-slate-800 flex flex-col justify-between p-4 flex-shrink-0">
-      <div className="space-y-6">
-        <div>
-          <div className="text-[11px] font-semibold tracking-wider text-slate-500 uppercase px-3 mb-2">
-            Disaster Operations
-          </div>
-          <nav className="space-y-1">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = currentTab === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => onSelectTab(item.id)}
-                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
-                    item.highlight
-                      ? isActive
-                        ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/30'
-                        : 'bg-blue-950/40 hover:bg-blue-900/50 text-blue-300 border border-blue-600/30'
-                      : isActive
-                      ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30 font-semibold'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-                  }`}
-                >
-                  <div className="flex items-center space-x-3">
-                    <Icon className={`h-4 w-4 ${isActive ? 'text-blue-400' : 'text-slate-400'}`} />
-                    <span>{item.label}</span>
-                  </div>
-                  {item.badge !== null && (
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded-full font-mono font-bold ${
-                        item.badgeColor || 'bg-slate-800 text-slate-300'
-                      }`}
-                    >
-                      {item.badge}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </nav>
+    <aside className="w-60 bg-[#0a0f1a] border-r border-slate-800/80 flex flex-col justify-between flex-shrink-0">
+      <div className="py-5 flex flex-col gap-1 overflow-y-auto px-3">
+        <div className="text-[10px] font-medium tracking-wider text-slate-500 uppercase px-3 mb-2">
+          Operations
         </div>
+        <nav className="flex flex-col gap-0.5">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = currentTab === item.id;
 
-        {/* Operating Guardrails Notice */}
-        <div className="bg-slate-900/90 border border-slate-800/80 rounded-lg p-3 text-xs space-y-2">
-          <div className="flex items-center space-x-1.5 text-slate-300 font-semibold">
-            <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
-            <span>Operational Guardrails</span>
-          </div>
-          <ul className="text-slate-400 space-y-1 text-[11px] leading-relaxed">
-            <li>• AI suggests; only human authorizes</li>
-            <li>• Minor photos & exact GPS geofenced</li>
-            <li>• Original evidence provenance preserved</li>
-          </ul>
-        </div>
+            return (
+              <button
+                key={item.id}
+                onClick={() => onSelectTab(item.id)}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-sm transition-all ${
+                  item.highlight && !isActive
+                    ? 'bg-blue-950/30 hover:bg-blue-900/30 text-blue-300 border border-blue-600/15'
+                    : isActive
+                    ? 'bg-slate-800/50 text-white border-l-[3px] border-blue-500 pl-[9px]'
+                    : 'text-slate-400 hover:bg-slate-800/30 hover:text-slate-200 border-l-[3px] border-transparent pl-[9px]'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Icon size={15} className={isActive ? 'text-blue-400' : item.highlight ? 'text-blue-400' : 'text-slate-500'} />
+                  <span className="font-medium">{item.label}</span>
+                </div>
+
+                {item.id === 'verification' && pendingMatchesCount > 0 && (
+                  <span className="flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500/15 text-amber-400 text-[10px] font-bold">
+                    {pendingMatchesCount}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
       </div>
 
-      {/* Footer System Info */}
-      <div className="pt-4 border-t border-slate-800/80 text-[11px] text-slate-500 space-y-1">
-        <div className="flex justify-between">
-          <span>Protocol:</span>
-          <span className="font-mono text-slate-400">BLE-MESH-v2.1</span>
+      {/* Footer */}
+      <div className="p-4 border-t border-slate-800/60">
+        <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-mono mb-2 px-1">
+          <ShieldCheck size={11} className="text-emerald-500" />
+          <span>AI suggests — Humans verify</span>
         </div>
-        <div className="flex justify-between">
-          <span>Encryption:</span>
-          <span className="font-mono text-slate-400">Ed25519 Sealing</span>
-        </div>
-        <div className="flex justify-between">
-          <span>Role:</span>
-          <span className="font-mono text-emerald-400">TECH_LEAD</span>
+        <div className="text-[10px] text-slate-600 font-mono flex flex-col gap-0.5 px-1">
+          <div className="flex items-center justify-between">
+            <span>Protocol</span>
+            <span className="text-slate-500">BLE-MESH-v2.1</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span>Encryption</span>
+            <span className="text-slate-500">Ed25519</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span>Role</span>
+            <span className="text-emerald-500">TECH_LEAD</span>
+          </div>
         </div>
       </div>
     </aside>
