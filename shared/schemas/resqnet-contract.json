@@ -1,0 +1,78 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ResQNetContract",
+  "description": "Standard JSON schema contract for ResQNet disaster cases and mesh envelopes",
+  "definitions": {
+    "PriorityLevel": {
+      "type": "string",
+      "enum": ["CRITICAL", "HIGH", "NORMAL", "LOW"]
+    },
+    "CaseStatus": {
+      "type": "string",
+      "enum": [
+        "REGISTERED", "SEARCHING", "INFORMATION_RECEIVED", "POSSIBLE_MATCH",
+        "UNDER_VERIFICATION", "VERIFIED", "FAMILY_NOTIFIED", "REUNITED",
+        "CLOSED", "REJECTED", "DUPLICATE"
+      ]
+    },
+    "MeshEnvelope": {
+      "type": "object",
+      "required": ["messageId", "messageType", "priority", "createdAt", "expiresAt", "hopCount", "maxHops", "senderPseudonym", "destinationType", "payload"],
+      "properties": {
+        "messageId": { "type": "string", "format": "uuid" },
+        "messageType": {
+          "type": "string",
+          "enum": [
+            "SAFE_STATUS", "MISSING_PERSON", "FOUND_PERSON", "SIGHTING",
+            "EMERGENCY", "CASE_UPDATE", "MATCH_CANDIDATE", "VERIFICATION_REQUEST",
+            "VERIFICATION_RESULT", "CASE_MERGE", "CASE_SPLIT", "HOSPITAL_ADMISSION",
+            "CAMP_REGISTRATION", "SYNC_REQUEST", "SYNC_RESPONSE", "NETWORK_STATUS"
+          ]
+        },
+        "priority": { "$ref": "#/definitions/PriorityLevel" },
+        "createdAt": { "type": "integer" },
+        "expiresAt": { "type": "integer" },
+        "hopCount": { "type": "integer", "minimum": 0 },
+        "maxHops": { "type": "integer", "minimum": 1, "maximum": 15 },
+        "senderPseudonym": { "type": "string" },
+        "destinationType": { "type": "string", "enum": ["BROADCAST", "GATEWAY", "SPECIFIC_NODE"] },
+        "payload": { "type": "object" },
+        "signature": { "type": "string" }
+      }
+    },
+    "DisasterCase": {
+      "type": "object",
+      "required": ["caseId", "type", "status", "priority", "person", "source", "verificationState", "createdAt"],
+      "properties": {
+        "caseId": { "type": "string" },
+        "type": { "type": "string", "enum": ["MISSING", "FOUND", "UNIDENTIFIED_PATIENT"] },
+        "status": { "$ref": "#/definitions/CaseStatus" },
+        "priority": { "$ref": "#/definitions/PriorityLevel" },
+        "person": {
+          "type": "object",
+          "required": ["name", "gender"],
+          "properties": {
+            "name": { "type": "string" },
+            "nickname": { "type": "string" },
+            "age": { "type": "integer" },
+            "approximateAge": { "type": "integer" },
+            "gender": { "type": "string", "enum": ["MALE", "FEMALE", "OTHER", "UNKNOWN"] },
+            "fatherMotherName": { "type": "string" },
+            "phoneNumber": { "type": "string" },
+            "alternateContact": { "type": "string" },
+            "identifyingMarks": { "type": "string" },
+            "height": { "type": "string" },
+            "clothing": { "type": "string" },
+            "medicalNeeds": { "type": "string" },
+            "isMinor": { "type": "boolean" },
+            "photoUrl": { "type": "string" },
+            "languageSpoken": { "type": "string" }
+          }
+        },
+        "source": { "type": "string", "enum": ["FAMILY", "PUBLIC", "VOLUNTEER", "HOSPITAL", "RELIEF_CAMP", "RESPONDER"] },
+        "verificationState": { "type": "string", "enum": ["UNVERIFIED", "CORROBORATED", "UNDER_REVIEW", "VERIFIED", "REJECTED"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

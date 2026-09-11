@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Python / Matching Engine
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Mobile / Android / Expo
+android/.gradle/
+android/app/build/
+ios/Pods/
+ios/build/
+.expo/
+*.apk
+*.aab
+
+# Local DB
+*.sqlite
+*.sqlite3
+*.db
