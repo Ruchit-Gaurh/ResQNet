@@ -15,7 +15,17 @@ export function AdminLoginScreen({ onAuthenticated, onUseDemo }: AdminLoginScree
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
 
   useEffect(() => {
-    void apiService.checkBackendHealth().then((health) => setBackendOnline(health.online));
+    let mounted = true;
+    const checkBackend = async () => {
+      const health = await apiService.checkBackendHealth();
+      if (mounted) setBackendOnline(health.online);
+    };
+    void checkBackend();
+    const timer = window.setInterval(() => void checkBackend(), 5_000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
   }, []);
 
   const submit = async (event: FormEvent) => {
