@@ -9,9 +9,11 @@
     "index.ts",
     "src/**/*.ts",
     "src/**/*.tsx",
+    "modules/**/*.ts",
     "../mesh/MeshTransportService.ts",
     "../mesh/queue/**/*.ts",
     "../mesh/protocol/**/*.ts",
+    "../mesh/native/**/*.ts",
     "../mesh/dev/**/*.ts",
     "../mesh/mock/**/*.ts",
     "../shared/types/index.ts"

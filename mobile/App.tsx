@@ -149,7 +149,10 @@ function AppContent() {
           activity={meshActivity}
           onBack={() => setRoute('HOME')}
           onDemoGatewaySync={syncDemoGateway}
+          onRetryNativeBle={() => services.retryNativeBle()}
+          onSendBleTestEnvelope={() => services.sendBleTestEnvelope()}
           showDemoGateway={services.canRunDemoGateway}
+          showBleDiagnostics={services.transportMode === 'NATIVE_BLE' && __DEV__}
         />
       );
     case 'SETTINGS':

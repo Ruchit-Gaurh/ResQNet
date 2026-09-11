@@ -12,7 +12,10 @@ interface NetworkStatusScreenProps {
   activity: MobileMeshActivity;
   onBack: () => void;
   onDemoGatewaySync: () => Promise<{ acknowledgedMessageIds: string[] }>;
+  onRetryNativeBle: () => Promise<void>;
+  onSendBleTestEnvelope: () => Promise<string>;
   showDemoGateway: boolean;
+  showBleDiagnostics: boolean;
 }
 
 export function NetworkStatusScreen({
@@ -20,9 +23,13 @@ export function NetworkStatusScreen({
   activity,
   onBack,
   onDemoGatewaySync,
+  onRetryNativeBle,
+  onSendBleTestEnvelope,
   showDemoGateway,
+  showBleDiagnostics,
 }: NetworkStatusScreenProps) {
   const [syncing, setSyncing] = useState(false);
+  const nativeBle = activity.transportMode === 'NATIVE_BLE';
 
   async function runDemoGatewaySync(): Promise<void> {
     setSyncing(true);
@@ -42,25 +49,61 @@ export function NetworkStatusScreen({
     }
   }
 
+  async function retryBluetooth(): Promise<void> {
+    setSyncing(true);
+    try {
+      await onRetryNativeBle();
+    } catch (error) {
+      Alert.alert('Bluetooth unavailable', error instanceof Error ? error.message : 'Could not restart Bluetooth mesh.');
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function sendTestEnvelope(): Promise<void> {
+    setSyncing(true);
+    try {
+      const messageId = await onSendBleTestEnvelope();
+      Alert.alert('BLE test queued', `${messageId.slice(0, 12)} is queued locally. Peer receipt is not a gateway ACK.`);
+    } catch (error) {
+      Alert.alert('BLE test failed', error instanceof Error ? error.message : 'Test envelope remains unsent.');
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   return (
     <Screen title="Network status" subtitle="Delivery states are shown separately and never inferred from a local save." onBack={onBack}>
       <NetworkStatusPill health={health} />
       <View style={styles.card}>
-        <Text style={styles.title}>Development Mesh</Text>
+        <Text style={styles.title}>{nativeBle ? 'Native Bluetooth Mesh' : 'Development Mesh'}</Text>
         <Text style={styles.topology}>
-          {activity.transportMode === 'DEV_EMULATOR_MESH'
+          {nativeBle
+            ? 'This phone ↔ nearby physical ResQNet phones'
+            : activity.transportMode === 'DEV_EMULATOR_MESH'
             ? 'This app ↔ Mac broker ↔ separate emulator'
             : 'This app → MOCK-B → MOCK-C → gateway boundary'}
         </Text>
         <Text style={styles.body}>
-          {activity.transportMode === 'DEV_EMULATOR_MESH'
+          {nativeBle
+            ? 'Foreground BLE scans only for the ResQNet service. Peer receipt means nearby relay only; gateway delivery remains pending.'
+            : activity.transportMode === 'DEV_EMULATOR_MESH'
             ? 'Serialized MeshEnvelope traffic leaves this app process over WebSocket. This is a development transport, not BLE or a backend.'
             : 'A and C have no direct link. This is the in-process simulator; native BLE is not connected.'}
         </Text>
         <View style={styles.metrics}>
           <Text style={styles.metric}>Node ID: {activity.nodeId}</Text>
           <Text style={styles.metric}>Transport: {activity.transportMode.replaceAll('_', ' ')}</Text>
-          <Text style={styles.metric}>Broker: {activity.brokerConnected ? 'CONNECTED' : 'DISCONNECTED'}</Text>
+          {nativeBle ? (
+            <>
+              <Text style={styles.metric}>Bluetooth: {activity.bluetoothEnabled ? 'ENABLED' : 'OFF / UNAVAILABLE'}</Text>
+              <Text style={styles.metric}>Radio: {activity.radioReady ? 'ADVERTISING + SCANNING' : 'NOT READY'}</Text>
+              <Text style={styles.metric}>Permission: {(activity.radioPermissionState ?? 'UNKNOWN').replaceAll('_', ' ')}</Text>
+              <Text style={styles.metric}>Nearby ResQNet peers: {activity.discoveredPeerIds?.length ?? 0}</Text>
+            </>
+          ) : (
+            <Text style={styles.metric}>Broker: {activity.brokerConnected ? 'CONNECTED' : 'DISCONNECTED'}</Text>
+          )}
           <Text style={styles.metric}>Connected peers: {activity.connectedPeerIds.length}</Text>
           {activity.connectedPeerIds.length > 0 ? (
             <Text style={styles.peerIds}>{activity.connectedPeerIds.join(', ')}</Text>
@@ -91,7 +134,7 @@ export function NetworkStatusScreen({
       <View style={styles.card}>
         <Text style={styles.title}>Honest delivery states</Text>
         <Text style={styles.item}>1. Saved locally — durable on this device</Text>
-        <Text style={styles.item}>2. Relaying — accepted by a simulated nearby node</Text>
+        <Text style={styles.item}>2. Relaying — sent to a nearby {nativeBle ? 'Bluetooth peer' : 'simulated node'}</Text>
         <Text style={styles.item}>3. Delivered — shown only after gateway/server ACK</Text>
       </View>
       {health.lastSuccessfulSyncTimestamp ? (
@@ -114,6 +157,26 @@ export function NetworkStatusScreen({
       ) : (
         <Text style={styles.demoNote}>Peer receipt does not remove an item from the gateway queue.</Text>
       )}
+      {nativeBle ? (
+        <TouchableOpacity
+          accessibilityRole="button"
+          disabled={syncing}
+          onPress={() => void retryBluetooth()}
+          style={[styles.syncButton, syncing ? styles.syncButtonDisabled : null]}
+        >
+          <Text style={styles.syncButtonText}>{syncing ? 'CHECKING…' : 'RETRY BLUETOOTH'}</Text>
+        </TouchableOpacity>
+      ) : null}
+      {nativeBle && showBleDiagnostics ? (
+        <TouchableOpacity
+          accessibilityRole="button"
+          disabled={syncing}
+          onPress={() => void sendTestEnvelope()}
+          style={[styles.diagnosticButton, syncing ? styles.syncButtonDisabled : null]}
+        >
+          <Text style={styles.diagnosticButtonText}>SEND TEST ENVELOPE</Text>
+        </TouchableOpacity>
+      ) : null}
     </Screen>
   );
 }
@@ -217,5 +280,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     marginTop: 7,
+  },
+  diagnosticButton: {
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.info,
+    marginTop: 10,
+  },
+  diagnosticButtonText: {
+    color: colors.info,
+    fontWeight: '900',
   },
 });

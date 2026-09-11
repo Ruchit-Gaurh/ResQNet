@@ -12,7 +12,7 @@ export function SettingsScreen({ onBack }: SettingsScreenProps) {
     <Screen title="Settings & safety" onBack={onBack}>
       <View style={styles.card}>
         <Text style={styles.title}>Transport</Text>
-        <Text style={styles.body}>Mock mesh is active for development. This build does not claim native BLE connectivity.</Text>
+        <Text style={styles.body}>The active transport is shown on Network Status. Native Bluetooth, emulator broker, and in-process mock modes all use the same local-first mesh interface.</Text>
       </View>
       <View style={styles.card}>
         <Text style={styles.title}>Privacy</Text>

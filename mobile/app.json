@@ -9,10 +9,13 @@
       "package": "org.resqnet.mobile"
     },
     "plugins": [
+      "./plugins/withResQNetBle",
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow ResQNet to attach a photo to this disaster report."
+          "photosPermission": "Allow ResQNet to attach a photo to this disaster report.",
+          "cameraPermission": false,
+          "microphonePermission": false
         }
       ]
     ]

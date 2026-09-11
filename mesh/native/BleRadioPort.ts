@@ -14,6 +14,7 @@ export const BLE_FRAME_HEADER_BYTES = 8;
 export const BLE_FRAME_VERSION = 1;
 export const DEFAULT_ADVERTISEMENT_ROTATION_MS = 15 * 60 * 1000;
 export const MAX_BLE_ENVELOPE_BYTES = 48 * 1024;
+export const DEFAULT_INCOMPLETE_FRAME_TIMEOUT_MS = 30 * 1000;
 
 export const ANDROID_BLE_RUNTIME_PERMISSIONS = [
   'android.permission.BLUETOOTH_SCAN',
@@ -36,6 +37,11 @@ export interface BleRadioCapabilities {
   canGattServer: boolean;
 }
 
+export interface BleRadioStatus extends BleRadioCapabilities {
+  permissionState: BlePermissionState;
+  bluetoothEnabled: boolean;
+}
+
 export interface BlePeerEvent {
   peerId: string;
   lastSeenAt: number;
@@ -50,6 +56,11 @@ export interface BleConnectionEvent {
 export interface BleFrameEvent {
   peerId: string;
   frame: Uint8Array;
+}
+
+export interface BleRadioErrorEvent {
+  operation: string;
+  message: string;
 }
 
 export interface BleAdvertisingConfig {
@@ -83,6 +94,8 @@ export interface BleRadioPort {
   onPeerFound(callback: (event: BlePeerEvent) => void): () => void;
   onConnectionChanged(callback: (event: BleConnectionEvent) => void): () => void;
   onFrameReceived(callback: (event: BleFrameEvent) => void): () => void;
+  onRadioStateChanged?(callback: () => void): () => void;
+  onRadioError?(callback: (event: BleRadioErrorEvent) => void): () => void;
 }
 
 function messageToken(bytes: Uint8Array): number {
@@ -129,12 +142,23 @@ export function frameBlePayload(payload: Uint8Array, maxFrameBytes: number): Uin
 interface PartialPayload {
   chunks: Array<Uint8Array | undefined>;
   received: number;
+  updatedAt: number;
 }
 
 export class BleFrameAssembler {
   private readonly partial = new Map<string, PartialPayload>();
 
+  constructor(
+    private readonly now: () => number = Date.now,
+    private readonly incompleteTimeoutMs = DEFAULT_INCOMPLETE_FRAME_TIMEOUT_MS,
+  ) {
+    if (incompleteTimeoutMs < 1) {
+      throw new Error('BLE incomplete-frame timeout must be positive.');
+    }
+  }
+
   accept(peerId: string, frame: Uint8Array): Uint8Array | undefined {
+    this.purgeExpired();
     if (frame.byteLength <= BLE_FRAME_HEADER_BYTES) {
       throw new Error('BLE frame has no payload.');
     }
@@ -151,9 +175,10 @@ export class BleFrameAssembler {
     const key = `${peerId}:${token}`;
     let current = this.partial.get(key);
     if (!current || current.chunks.length !== count) {
-      current = { chunks: Array.from({ length: count }), received: 0 };
+      current = { chunks: Array.from({ length: count }), received: 0, updatedAt: this.now() };
       this.partial.set(key, current);
     }
+    current.updatedAt = this.now();
     if (!current.chunks[index]) {
       current.chunks[index] = frame.slice(BLE_FRAME_HEADER_BYTES);
       current.received += 1;
@@ -170,7 +195,26 @@ export class BleFrameAssembler {
       payload.set(chunk, offset);
       offset += chunk.length;
     }
+    if (messageToken(payload) !== token) {
+      throw new Error('BLE payload integrity check failed.');
+    }
     return payload;
+  }
+
+  purgeExpired(): number {
+    const cutoff = this.now() - this.incompleteTimeoutMs;
+    let removed = 0;
+    for (const [key, value] of this.partial) {
+      if (value.updatedAt <= cutoff) {
+        this.partial.delete(key);
+        removed += 1;
+      }
+    }
+    return removed;
+  }
+
+  getPendingTransferCount(): number {
+    return this.partial.size;
   }
 
   clearPeer(peerId: string): void {

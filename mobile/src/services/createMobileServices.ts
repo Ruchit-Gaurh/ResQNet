@@ -1,4 +1,5 @@
 import { randomUUID } from 'expo-crypto';
+import { Platform } from 'react-native';
 
 import type { MeshTransportService } from '../../../mesh/MeshTransportService';
 import {
@@ -6,6 +7,10 @@ import {
   type DevMeshActivity,
 } from '../../../mesh/dev/DevMeshTransport';
 import { MockMeshNetwork, MockMeshTransport } from '../../../mesh/mock/MockMeshTransport';
+import {
+  NativeBleMeshTransport,
+  type NativeBleActivity,
+} from '../../../mesh/native/NativeBleMeshTransport';
 import {
   Deduplicator,
   KeyValueSeenMessageStore,
@@ -19,6 +24,7 @@ import { asyncStorageAdapter } from './AsyncStorageAdapters';
 import { getOrCreateDevNodeId } from './DevNodeIdentity';
 import { LocalQueueService, type ReceivedMeshRecord } from './LocalQueueService';
 import { ReportSubmissionService } from './ReportSubmissionService';
+import { AndroidBleRadioPort } from './AndroidBleRadioPort';
 
 export type MobileMeshMode = 'MOCK_IN_PROCESS' | 'DEV_EMULATOR_MESH' | 'NATIVE_BLE';
 
@@ -27,6 +33,10 @@ export interface MobileMeshActivity {
   nodeId: string;
   brokerUrl?: string;
   brokerConnected: boolean;
+  bluetoothEnabled?: boolean;
+  radioReady?: boolean;
+  radioPermissionState?: string;
+  discoveredPeerIds?: string[];
   connectedPeerIds: string[];
   queuedCount: number;
   receivedCount: number;
@@ -53,11 +63,15 @@ export interface MobileServices {
   subscribeMeshActivity(callback: () => void): () => void;
   shutdown(): void;
   syncDemoGateway(): Promise<SyncBatchResponse>;
+  retryNativeBle(): Promise<void>;
+  sendBleTestEnvelope(): Promise<string>;
 }
 
 function configuredMode(): MobileMeshMode {
   const value = process.env.EXPO_PUBLIC_MESH_TRANSPORT;
   if (value === 'DEV_EMULATOR_MESH' || value === 'NATIVE_BLE') return value;
+  // A standalone judge build must not depend on Metro or the Mac broker.
+  if (Platform.OS === 'android' && !__DEV__) return 'NATIVE_BLE';
   return 'MOCK_IN_PROCESS';
 }
 
@@ -85,6 +99,8 @@ export function createMobileServices(): MobileServices {
   let nodeId = 'INITIALIZING';
   let mockGatewayNode: MockMeshTransport | undefined;
   let devActivity: DevMeshActivity | undefined;
+  let nativeActivity: NativeBleActivity | undefined;
+  let nativeMesh: NativeBleMeshTransport | undefined;
   let shutdownTransport: (() => void) | undefined;
   let initialized = false;
 
@@ -117,10 +133,32 @@ export function createMobileServices(): MobileServices {
       );
 
       if (mode === 'NATIVE_BLE') {
-        throw new Error('Native BLE mode requires an Android BleRadioPort driver. Use DEV_EMULATOR_MESH for this demo.');
-      }
-
-      if (mode === 'DEV_EMULATOR_MESH') {
+        // The radio driver and its honest capability/error state are native;
+        // durable queue and disaster protocol behavior stay in the shared abstraction.
+        nativeMesh = new NativeBleMeshTransport(nodeId, new AndroidBleRadioPort(), {
+          queue: persistentQueue,
+          deduplicator: persistentDedup,
+          createEphemeralTag: randomUUID,
+        });
+        mesh = nativeMesh;
+        shutdownTransport = () => { void nativeMesh?.shutdown(); };
+        nativeMesh.onActivityChanged((activity) => {
+          nativeActivity = activity;
+          notify();
+        });
+        nativeMesh.onPeerReceipt((messageId) => {
+          void localQueue.markPeerReached(messageId).catch((error: unknown) => {
+            console.warn('Could not persist Bluetooth peer receipt.', error);
+          });
+        });
+        nativeMesh.onMessageReceived((envelope) => {
+          const fromNodeId = nativeMesh?.getActivity().lastReceived?.fromNodeId;
+          void localQueue.saveReceivedEnvelope(envelope, fromNodeId).catch((error: unknown) => {
+            console.warn('Could not persist received Bluetooth envelope.', error);
+          });
+        });
+        await nativeMesh.init();
+      } else if (mode === 'DEV_EMULATOR_MESH') {
         const brokerUrl = process.env.EXPO_PUBLIC_DEV_MESH_URL ?? 'ws://10.0.2.2:8787';
         const devMesh = new DevMeshTransport(nodeId, brokerUrl, {
           queue: persistentQueue,
@@ -216,6 +254,33 @@ export function createMobileServices(): MobileServices {
           } : undefined),
         };
       }
+      if (nativeActivity) {
+        return {
+          transportMode: mode,
+          nodeId,
+          brokerConnected: false,
+          bluetoothEnabled: nativeActivity.bluetoothEnabled,
+          radioReady: nativeActivity.radioReady,
+          radioPermissionState: nativeActivity.permissionState,
+          discoveredPeerIds: nativeActivity.discoveredPeerIds,
+          connectedPeerIds: nativeActivity.connectedPeerIds,
+          queuedCount: queued.length,
+          receivedCount: Math.max(nativeActivity.receivedCount, received.length),
+          relayedCount: nativeActivity.relayedCount,
+          peerReceiptCount: nativeActivity.peerReceiptCount,
+          gatewayState: mesh.getNetworkHealth().lastSuccessfulSyncTimestamp ? 'ACKNOWLEDGED' : 'NOT_CONNECTED',
+          lastActivity: nativeActivity.lastActivity,
+          lastReceived: nativeActivity.lastReceived ? {
+            ...nativeActivity.lastReceived,
+            summary: lastReceived ? summaryFromRecord(lastReceived) : nativeActivity.lastReceived.messageType.replaceAll('_', ' '),
+          } : lastReceived ? {
+            messageId: lastReceived.messageId,
+            messageType: lastReceived.envelope.messageType,
+            fromNodeId: lastReceived.fromNodeId,
+            summary: summaryFromRecord(lastReceived),
+          } : undefined,
+        };
+      }
       const health = mesh.getNetworkHealth();
       return {
         transportMode: mode,
@@ -248,6 +313,32 @@ export function createMobileServices(): MobileServices {
       await localQueue.applySyncResponse(response);
       notify();
       return response;
+    },
+
+    async retryNativeBle(): Promise<void> {
+      if (!nativeMesh) throw new Error('Native Bluetooth transport is not selected.');
+      await nativeMesh.retryRadio();
+      notify();
+    },
+
+    async sendBleTestEnvelope(): Promise<string> {
+      if (!nativeMesh) throw new Error('Native Bluetooth transport is not selected.');
+      const now = Date.now();
+      const messageId = randomUUID();
+      await nativeMesh.sendMeshMessage({
+        messageId,
+        messageType: 'NETWORK_STATUS',
+        priority: 'LOW',
+        createdAt: now,
+        expiresAt: now + 10 * 60 * 1000,
+        hopCount: 0,
+        maxHops: 3,
+        senderPseudonym: `MOBILE-${nodeId}`,
+        destinationType: 'BROADCAST',
+        payload: { diagnostic: true, note: 'ResQNet BLE test envelope' },
+      });
+      notify();
+      return messageId;
     },
   };
 }

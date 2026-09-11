@@ -30,9 +30,11 @@ const ACTIONS: Array<{ route: AppRoute; icon: string; label: string; color: stri
 ];
 
 export function HomeScreen({ health, transportMode, onNavigate }: HomeScreenProps) {
-  const transportLabel = transportMode === 'DEV_EMULATOR_MESH'
-    ? 'Development emulator mesh is active through the local broker. This is not BLE.'
-    : 'Development mode uses the in-process A to B to C mock mesh. This is not BLE.';
+  const transportLabel = transportMode === 'NATIVE_BLE'
+    ? 'Native Bluetooth relay mode. Peer receipt is not the same as gateway delivery.'
+    : transportMode === 'DEV_EMULATOR_MESH'
+      ? 'Development emulator mesh is active through the local broker. This is not BLE.'
+      : 'Development mode uses the in-process A to B to C mock mesh. This is not BLE.';
   return (
     <Screen title="RESQNET" subtitle="Emergency identity and family coordination">
       <NetworkStatusPill health={health} />

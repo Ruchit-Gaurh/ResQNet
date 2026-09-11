@@ -26,7 +26,7 @@ export function NetworkStatusPill({ health }: NetworkStatusPillProps) {
         <Text style={styles.label}>{state.label}</Text>
         <Text style={styles.detail}>
           {health.connectivity === 'MESH_CONNECTED'
-            ? `${health.nearbyPeerCount} nearby development peer${health.nearbyPeerCount === 1 ? '' : 's'}`
+            ? `${health.nearbyPeerCount} nearby peer${health.nearbyPeerCount === 1 ? '' : 's'}`
             : `${health.queuedMessageCount} message${health.queuedMessageCount === 1 ? '' : 's'} queued`}
         </Text>
       </View>
