@@ -75,7 +75,7 @@ describe('Mobile device authentication', () => {
     const response = await fetch(`${baseUrl}/api/v1/auth/admin`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ accessKey: config.admin.accessKey }),
+      body: JSON.stringify({ accessKey: `  ${config.admin.accessKey}  ` }),
     });
     const body = await response.json() as { token: string; role: string; userId: string };
 

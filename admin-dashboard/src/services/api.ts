@@ -86,7 +86,7 @@ class ApiService {
     const response = await fetch(`${this.backendBaseUrl}/auth/admin`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ accessKey }),
+      body: JSON.stringify({ accessKey: accessKey.trim() }),
     });
     const payload = await response.json().catch(() => ({})) as { token?: string; error?: string };
     if (!response.ok || !payload.token) {

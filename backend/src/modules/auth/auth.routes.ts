@@ -15,8 +15,17 @@ const deviceTokenRequestSchema = z.object({
   }),
 }).strict();
 const adminTokenRequestSchema = z.object({
-  accessKey: z.string().min(16).max(512),
+  accessKey: z.string().max(512),
 }).strict();
+
+function normalizeAdminAccessKey(value: string): string {
+  let normalized = value.trim();
+  const hasWrappingQuotes = normalized.length >= 2
+    && ((normalized.startsWith('"') && normalized.endsWith('"'))
+      || (normalized.startsWith("'") && normalized.endsWith("'")));
+  if (hasWrappingQuotes) normalized = normalized.slice(1, -1).trim();
+  return normalized;
+}
 
 function secretsMatch(supplied: string, expected: string): boolean {
   const suppliedBytes = Buffer.from(supplied);
@@ -70,17 +79,38 @@ authRouter.post('/device', (req, res) => {
 authRouter.post('/admin', (req, res) => {
   const parsed = adminTokenRequestSchema.safeParse(req.body);
   if (!parsed.success) {
+    console.warn('[AUTH] Admin sign-in rejected: malformed request body.');
     return res.status(400).json({ success: false, error: 'Invalid administrator sign-in request.' });
   }
   if (!config.admin.accessKey) {
+    console.error('[AUTH] Admin sign-in unavailable: ADMIN_ACCESS_KEY is not configured.');
     return res.status(503).json({
       success: false,
       error: 'Administrator sign-in is not configured on this deployment.',
     });
   }
-  if (!secretsMatch(parsed.data.accessKey, config.admin.accessKey)) {
+  const suppliedAccessKey = normalizeAdminAccessKey(parsed.data.accessKey);
+  const configuredAccessKey = normalizeAdminAccessKey(config.admin.accessKey);
+  if (configuredAccessKey.length < 16) {
+    console.error('[AUTH] Admin sign-in unavailable: configured key is shorter than 16 characters.');
+    return res.status(503).json({
+      success: false,
+      error: 'Administrator access-key configuration is invalid.',
+    });
+  }
+  if (suppliedAccessKey.length < 16) {
+    console.warn('[AUTH] Admin sign-in rejected: supplied key is shorter than 16 characters.');
     return res.status(401).json({ success: false, error: 'Invalid administrator access key.' });
   }
+  if (!secretsMatch(suppliedAccessKey, configuredAccessKey)) {
+    console.warn('[AUTH] Admin sign-in rejected: access-key mismatch.', {
+      suppliedLength: suppliedAccessKey.length,
+      configuredLength: configuredAccessKey.length,
+    });
+    return res.status(401).json({ success: false, error: 'Invalid administrator access key.' });
+  }
+
+  console.info('[AUTH] Responder dashboard authenticated.');
 
   const userId = 'admin-dashboard';
   const role = 'RESPONDER_ADMIN';
