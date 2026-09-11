@@ -3,8 +3,7 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import type { NetworkHealthStatus } from '../../../shared/types/index';
 import { NetworkStatusPill } from '../components/NetworkStatusPill';
 import { Screen } from '../components/Screen';
-import { colors } from '../theme';
-import type { MobileMeshMode } from '../services/createMobileServices';
+import { colors, radii, spacing, typography } from '../theme';
 
 export type AppRoute =
   | 'HOME'
@@ -18,51 +17,115 @@ export type AppRoute =
 
 interface HomeScreenProps {
   health: NetworkHealthStatus;
-  transportMode: MobileMeshMode;
   onNavigate: (route: AppRoute) => void;
 }
 
-const ACTIONS: Array<{ route: AppRoute; icon: string; label: string; color: string }> = [
-  { route: 'SAFE', icon: '✓', label: "I'M SAFE", color: colors.safe },
-  { route: 'MISSING', icon: '!', label: 'SOMEONE IS MISSING', color: colors.missing },
-  { route: 'FOUND', icon: '+', label: 'I FOUND SOMEONE', color: colors.found },
-  { route: 'SIGHTING', icon: '◉', label: 'REPORT A SIGHTING', color: colors.sighting },
+interface EmergencyAction {
+  route: AppRoute;
+  marker: string;
+  label: string;
+  description: string;
+  color: string;
+  tint: string;
+  filled?: boolean;
+}
+
+const ACTIONS: EmergencyAction[] = [
+  {
+    route: 'SAFE',
+    marker: '✓',
+    label: "I'm safe",
+    description: 'Let family and responders know',
+    color: colors.safe,
+    tint: colors.safeTint,
+    filled: true,
+  },
+  {
+    route: 'MISSING',
+    marker: '!',
+    label: 'Someone is missing',
+    description: 'Start a missing person report',
+    color: colors.missing,
+    tint: colors.missingTint,
+    filled: true,
+  },
+  {
+    route: 'FOUND',
+    marker: '+',
+    label: 'I found someone',
+    description: 'Their name can be unknown',
+    color: colors.found,
+    tint: colors.foundTint,
+  },
+  {
+    route: 'SIGHTING',
+    marker: '•',
+    label: 'Report a sighting',
+    description: 'Share unverified information',
+    color: colors.sighting,
+    tint: colors.sightingTint,
+  },
 ];
 
-export function HomeScreen({ health, transportMode, onNavigate }: HomeScreenProps) {
-  const transportLabel = transportMode === 'NATIVE_BLE'
-    ? 'Native Bluetooth relay mode. Peer receipt is not the same as gateway delivery.'
-    : transportMode === 'DEV_EMULATOR_MESH'
-      ? 'Development emulator mesh is active through the local broker. This is not BLE.'
-      : 'Development mode uses the in-process A to B to C mock mesh. This is not BLE.';
+export function HomeScreen({ health, onNavigate }: HomeScreenProps) {
   return (
-    <Screen title="RESQNET" subtitle="Emergency identity and family coordination">
-      <NetworkStatusPill health={health} />
-      <View style={styles.mockNotice}>
-        <Text style={styles.mockText}>{transportLabel}</Text>
+    <Screen title="ResQNet" subtitle="Disaster response and family coordination">
+      <NetworkStatusPill health={health} onPress={() => onNavigate('NETWORK')} />
+
+      <View style={styles.prompt}>
+        <Text accessibilityRole="header" style={styles.promptTitle}>What do you need help with?</Text>
+        <Text style={styles.promptBody}>Choose one action. Every report is saved on this phone first.</Text>
       </View>
+
       <View style={styles.actions}>
-        {ACTIONS.map((action) => (
-          <TouchableOpacity
-            accessibilityRole="button"
-            key={action.route}
-            onPress={() => onNavigate(action.route)}
-            style={[styles.action, { backgroundColor: action.color }]}
-          >
-            <Text style={styles.actionIcon}>{action.icon}</Text>
-            <Text style={styles.actionLabel}>{action.label}</Text>
-          </TouchableOpacity>
-        ))}
+        {ACTIONS.map((action) => {
+          const foreground = action.filled ? colors.onAccent : action.color;
+          const secondary = action.filled ? colors.onAccent : colors.muted;
+          return (
+            <TouchableOpacity
+              accessibilityHint={action.description}
+              accessibilityRole="button"
+              activeOpacity={0.78}
+              key={action.route}
+              onPress={() => onNavigate(action.route)}
+              style={[
+                styles.action,
+                { backgroundColor: action.filled ? action.color : colors.surface },
+                action.filled ? null : styles.outlineAction,
+              ]}
+            >
+              <View style={[styles.marker, { backgroundColor: action.filled ? 'rgba(255, 255, 255, 0.14)' : action.tint }]}>
+                <Text style={[styles.markerText, { color: foreground }]}>{action.marker}</Text>
+              </View>
+              <View style={styles.actionCopy}>
+                <Text style={[styles.actionLabel, { color: foreground }]}>{action.label}</Text>
+                <Text style={[styles.actionDescription, { color: secondary }]}>{action.description}</Text>
+              </View>
+              <Text accessible={false} style={[styles.actionChevron, { color: foreground }]}>›</Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
-      <View style={styles.secondary}>
-        <TouchableOpacity onPress={() => onNavigate('NETWORK')} style={styles.secondaryButton}>
-          <Text style={styles.secondaryText}>Network Status</Text>
+
+      <TouchableOpacity
+        accessibilityHint="View updates for reports created on this phone"
+        accessibilityRole="button"
+        onPress={() => onNavigate('CASES')}
+        style={styles.casesButton}
+      >
+        <View style={styles.casesCopy}>
+          <Text style={styles.casesTitle}>My cases and updates</Text>
+          <Text style={styles.casesBody}>Track searches, possible matches, and verified news</Text>
+        </View>
+        <Text accessible={false} style={styles.casesChevron}>›</Text>
+      </TouchableOpacity>
+
+      <View style={styles.utilityRow}>
+        <TouchableOpacity accessibilityRole="button" onPress={() => onNavigate('NETWORK')} style={styles.utilityButton}>
+          <Text style={styles.utilityText}>Network status</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => onNavigate('CASES')} style={styles.secondaryButton}>
-          <Text style={styles.secondaryText}>My Cases</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => onNavigate('SETTINGS')} style={styles.secondaryButton}>
-          <Text style={styles.secondaryText}>Settings</Text>
+        <TouchableOpacity accessibilityRole="button" onPress={() => onNavigate('SETTINGS')} style={styles.utilityButton}>
+          <Text style={styles.utilityText}>Safety & privacy</Text>
         </TouchableOpacity>
       </View>
     </Screen>
@@ -70,60 +133,115 @@ export function HomeScreen({ health, transportMode, onNavigate }: HomeScreenProp
 }
 
 const styles = StyleSheet.create({
-  mockNotice: {
-    backgroundColor: colors.overlay,
-    borderRadius: 10,
-    padding: 10,
-    marginTop: 10,
+  prompt: {
+    marginTop: spacing.xl,
+    marginBottom: spacing.sm,
   },
-  mockText: {
-    color: '#6B4B00',
-    fontSize: 13,
-    fontWeight: '700',
+  promptTitle: {
+    color: colors.textStrong,
+    fontSize: 23,
+    lineHeight: 29,
+    fontWeight: '800',
+  },
+  promptBody: {
+    color: colors.muted,
+    ...typography.label,
+    fontWeight: '400',
+    marginTop: spacing.xxs,
   },
   actions: {
-    gap: 12,
-    marginTop: 20,
+    gap: 10,
   },
   action: {
-    minHeight: 86,
-    borderRadius: 16,
+    minHeight: 76,
+    borderRadius: radii.lg,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
   },
-  actionIcon: {
-    color: '#FFFFFF',
-    fontSize: 31,
-    fontWeight: '900',
-    width: 48,
-  },
-  actionLabel: {
-    flex: 1,
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontWeight: '900',
-  },
-  secondary: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 18,
-  },
-  secondaryButton: {
-    flex: 1,
-    minHeight: 52,
-    borderRadius: 12,
+  outlineAction: {
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.surface,
+  },
+  marker: {
+    width: 42,
+    height: 42,
+    borderRadius: radii.md,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 5,
   },
-  secondaryText: {
-    color: colors.text,
-    fontSize: 13,
-    textAlign: 'center',
+  markerText: {
+    fontSize: 25,
+    lineHeight: 28,
+    fontWeight: '900',
+  },
+  actionCopy: {
+    flex: 1,
+    minWidth: 0,
+    marginLeft: 13,
+  },
+  actionLabel: {
+    fontSize: 18,
+    lineHeight: 23,
     fontWeight: '800',
+  },
+  actionDescription: {
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 2,
+  },
+  actionChevron: {
+    fontSize: 28,
+    lineHeight: 30,
+    marginLeft: spacing.xs,
+  },
+  casesButton: {
+    minHeight: 68,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  casesCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  casesTitle: {
+    color: colors.textStrong,
+    ...typography.bodyStrong,
+  },
+  casesBody: {
+    color: colors.muted,
+    ...typography.caption,
+    marginTop: 2,
+  },
+  casesChevron: {
+    color: colors.primary,
+    fontSize: 28,
+    marginLeft: spacing.sm,
+  },
+  utilityRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  utilityButton: {
+    flex: 1,
+    minHeight: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xs,
+  },
+  utilityText: {
+    color: colors.primary,
+    fontSize: 14,
+    textAlign: 'center',
+    fontWeight: '700',
   },
 });

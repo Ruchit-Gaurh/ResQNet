@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, BackHandler, Platform, StyleSheet, Text } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import type { NetworkHealthStatus } from '../shared/types/index';
@@ -37,7 +37,8 @@ const INITIAL_ACTIVITY: MobileMeshActivity = {
 };
 
 function AppContent() {
-  const services = useMemo(() => createMobileServices(), []);
+  const [serviceGeneration, setServiceGeneration] = useState(0);
+  const services = useMemo(() => createMobileServices(), [serviceGeneration]);
   const [route, setRoute] = useState<AppRoute>('HOME');
   const [health, setHealth] = useState<NetworkHealthStatus>(INITIAL_HEALTH);
   const [meshActivity, setMeshActivity] = useState<MobileMeshActivity>(INITIAL_ACTIVITY);
@@ -55,8 +56,19 @@ function AppContent() {
       (latest, record) => latest === undefined || record.updatedAt > latest ? record.updatedAt : latest,
       undefined,
     );
+    const connectivity: NetworkHealthStatus['connectivity'] =
+      services.canSyncBackend && nextActivity.gatewayState === 'ACKNOWLEDGED'
+        ? 'INTERNET_CONNECTED'
+        : nextActivity.connectedPeerIds.length > 0
+          ? 'MESH_CONNECTED'
+          : nextActivity.queuedCount > 0
+            ? 'OFFLINE_QUEUED'
+            : 'ISOLATED';
     setHealth({
       ...nextHealth,
+      connectivity,
+      nearbyPeerCount: nextActivity.connectedPeerIds.length,
+      queuedMessageCount: nextActivity.queuedCount,
       lastSuccessfulSyncTimestamp:
         nextHealth.lastSuccessfulSyncTimestamp ?? persistedAcknowledgement,
     });
@@ -88,20 +100,6 @@ function AppContent() {
     };
   }, [refreshHealth, services]);
 
-  useEffect(() => {
-    if (Platform.OS !== 'android') {
-      return undefined;
-    }
-    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (route === 'HOME') {
-        return false;
-      }
-      setRoute('HOME');
-      return true;
-    });
-    return () => subscription.remove();
-  }, [route]);
-
   const onSaved = useCallback(() => {
     void refreshHealth();
     if (services.canSyncBackend) {
@@ -129,6 +127,18 @@ function AppContent() {
       <SafeAreaView style={styles.center}>
         <Text style={styles.errorTitle}>ResQNet could not start</Text>
         <Text style={styles.errorText}>{startupError}</Text>
+        <Text style={styles.errorHelp}>Your report has not been submitted. Check the message above, then try again.</Text>
+        <TouchableOpacity
+          accessibilityRole="button"
+          onPress={() => {
+            setStartupError(undefined);
+            setReady(false);
+            setServiceGeneration((generation) => generation + 1);
+          }}
+          style={styles.retryButton}
+        >
+          <Text style={styles.retryText}>Try again</Text>
+        </TouchableOpacity>
       </SafeAreaView>
     );
   }
@@ -156,6 +166,7 @@ function AppContent() {
         <FamilyDashboardScreen
           localQueue={services.localQueue}
           onBack={() => setRoute('HOME')}
+          onReportMissing={() => setRoute('MISSING')}
           onRefreshServer={services.canSyncBackend ? syncBackend : undefined}
         />
       );
@@ -179,7 +190,7 @@ function AppContent() {
       return <SettingsScreen onBack={() => setRoute('HOME')} />;
     case 'HOME':
     default:
-      return <HomeScreen health={health} transportMode={services.transportMode} onNavigate={setRoute} />;
+      return <HomeScreen health={health} onNavigate={setRoute} />;
   }
 }
 
@@ -214,5 +225,28 @@ const styles = StyleSheet.create({
     color: colors.text,
     textAlign: 'center',
     marginTop: 8,
+  },
+  errorHelp: {
+    color: colors.muted,
+    fontSize: 14,
+    lineHeight: 20,
+    maxWidth: 360,
+    textAlign: 'center',
+    marginTop: 10,
+  },
+  retryButton: {
+    minHeight: 52,
+    minWidth: 150,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.info,
+    borderRadius: 12,
+    marginTop: 20,
+    paddingHorizontal: 22,
+  },
+  retryText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800',
   },
 });

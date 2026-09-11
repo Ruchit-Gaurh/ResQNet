@@ -1,41 +1,65 @@
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text } from 'react-native';
 
-import { colors } from '../theme';
+import { colors, radii, spacing, typography } from '../theme';
 
-interface SubmitButtonProps {
+export interface SubmitButtonProps {
   label: string;
   busy: boolean;
   color?: string;
+  disabled?: boolean;
+  accessibilityHint?: string;
   onPress: () => void;
 }
 
-export function SubmitButton({ label, busy, color = colors.text, onPress }: SubmitButtonProps) {
+export function SubmitButton({
+  label,
+  busy,
+  color = colors.primary,
+  disabled = false,
+  accessibilityHint,
+  onPress,
+}: SubmitButtonProps) {
+  const unavailable = busy || disabled;
+
   return (
-    <TouchableOpacity
+    <Pressable
+      accessibilityHint={accessibilityHint}
+      accessibilityLabel={busy ? `${label}, saving` : label}
       accessibilityRole="button"
-      disabled={busy}
+      accessibilityState={{ busy, disabled: unavailable }}
+      disabled={unavailable}
       onPress={onPress}
-      style={[styles.button, { backgroundColor: color }, busy ? styles.disabled : null]}
+      style={({ pressed }) => [
+        styles.button,
+        { backgroundColor: color },
+        pressed ? styles.pressed : null,
+        unavailable ? styles.disabled : null,
+      ]}
     >
-      {busy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.text}>{label}</Text>}
-    </TouchableOpacity>
+      {busy ? <ActivityIndicator color={colors.onAccent} /> : <Text style={styles.text}>{label}</Text>}
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   button: {
-    minHeight: 58,
-    borderRadius: 14,
+    minHeight: 56,
+    borderRadius: radii.md,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 8,
+    marginTop: spacing.xs,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
+  pressed: {
+    opacity: 0.86,
   },
   disabled: {
-    opacity: 0.65,
+    backgroundColor: colors.disabledSurface,
   },
   text: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '900',
+    color: colors.onAccent,
+    ...typography.button,
+    textAlign: 'center',
   },
 });

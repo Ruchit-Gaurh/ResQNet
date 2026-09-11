@@ -121,6 +121,7 @@ export function createMobileServices(): MobileServices {
   let initialized = false;
   let backendSyncTimer: ReturnType<typeof setInterval> | undefined;
   let backendSyncInFlight: Promise<SyncBatchResponse> | undefined;
+  let backendGatewayState: MobileMeshActivity['gatewayState'] = 'NOT_CONNECTED';
 
   const notify = () => {
     for (const subscriber of subscribers) subscriber();
@@ -156,7 +157,10 @@ export function createMobileServices(): MobileServices {
         `mobile-${nodeId}`,
       );
       const gatewayClient = new FetchGatewayClient({
-        getAccessToken: __DEV__ ? () => developmentAuth.getAccessToken() : undefined,
+        getAccessToken:
+          mode === 'DEV_EMULATOR_MESH' || __DEV__
+            ? () => developmentAuth.getAccessToken()
+            : undefined,
       });
 
       if (mode === 'NATIVE_BLE') {
@@ -283,6 +287,7 @@ export function createMobileServices(): MobileServices {
       if (devActivity) {
         return {
           ...devActivity,
+          gatewayState: canSyncBackend ? backendGatewayState : devActivity.gatewayState,
           receivedCount: Math.max(devActivity.receivedCount, received.length),
           queuedCount: queued.length,
           lastReceived: devActivity.lastReceived ?? (lastReceived ? {
@@ -307,7 +312,11 @@ export function createMobileServices(): MobileServices {
           receivedCount: Math.max(nativeActivity.receivedCount, received.length),
           relayedCount: nativeActivity.relayedCount,
           peerReceiptCount: nativeActivity.peerReceiptCount,
-          gatewayState: mesh.getNetworkHealth().lastSuccessfulSyncTimestamp ? 'ACKNOWLEDGED' : 'NOT_CONNECTED',
+          gatewayState: canSyncBackend
+            ? backendGatewayState
+            : mesh.getNetworkHealth().lastSuccessfulSyncTimestamp
+              ? 'ACKNOWLEDGED'
+              : 'NOT_CONNECTED',
           lastActivity: nativeActivity.lastActivity,
           lastReceived: nativeActivity.lastReceived ? {
             ...nativeActivity.lastReceived,
@@ -330,7 +339,11 @@ export function createMobileServices(): MobileServices {
         receivedCount: received.length,
         relayedCount: 0,
         peerReceiptCount: 0,
-        gatewayState: health.lastSuccessfulSyncTimestamp ? 'ACKNOWLEDGED' : 'NOT_CONNECTED',
+        gatewayState: canSyncBackend
+          ? backendGatewayState
+          : health.lastSuccessfulSyncTimestamp
+            ? 'ACKNOWLEDGED'
+            : 'NOT_CONNECTED',
         lastActivity: 'In-process A to B to C mock topology active',
       };
     },
@@ -361,10 +374,19 @@ export function createMobileServices(): MobileServices {
         throw new Error('Real backend sync is not enabled for this transport mode.');
       }
       if (!backendSyncInFlight) {
-        backendSyncInFlight = submissions.syncWithGateway(backendBaseUrl).finally(() => {
-          backendSyncInFlight = undefined;
-          notify();
-        });
+        backendSyncInFlight = submissions.syncWithGateway(backendBaseUrl)
+          .then((response) => {
+            backendGatewayState = 'ACKNOWLEDGED';
+            return response;
+          })
+          .catch((error: unknown) => {
+            backendGatewayState = 'FAILED';
+            throw error;
+          })
+          .finally(() => {
+            backendSyncInFlight = undefined;
+            notify();
+          });
       }
       return backendSyncInFlight;
     },

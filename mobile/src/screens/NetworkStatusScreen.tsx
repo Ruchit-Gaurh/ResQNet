@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-import type { NetworkHealthStatus } from '../../../shared/types/index';
+import type { MeshMessageType, NetworkHealthStatus } from '../../../shared/types/index';
+import { Disclosure } from '../components/Disclosure';
 import { NetworkStatusPill } from '../components/NetworkStatusPill';
 import { Screen } from '../components/Screen';
 import type { MobileMeshActivity } from '../services/createMobileServices';
-import { colors } from '../theme';
+import { colors, radii, spacing, typography } from '../theme';
 
 interface NetworkStatusScreenProps {
   health: NetworkHealthStatus;
@@ -19,6 +20,32 @@ interface NetworkStatusScreenProps {
   showBackendSync: boolean;
   backendBaseUrl: string;
   showBleDiagnostics: boolean;
+}
+
+const MESSAGE_LABELS: Partial<Record<MeshMessageType, string>> = {
+  MISSING_PERSON: 'missing person report',
+  FOUND_PERSON: 'found person report',
+  SAFE_STATUS: 'safe check-in',
+  SIGHTING: 'sighting report',
+};
+
+function displayNodeId(nodeId: string): string {
+  return nodeId.length <= 24 ? nodeId : `${nodeId.slice(0, 14)}…${nodeId.slice(-6)}`;
+}
+
+function DeviceRow({ nodeId, state }: { nodeId: string; state: 'Connected' | 'Nearby' }) {
+  const connected = state === 'Connected';
+  return (
+    <View
+      accessibilityLabel={`${nodeId}. ${state} ResQNet device.`}
+      accessible
+      style={styles.deviceRow}
+    >
+      <View style={[styles.deviceDot, { backgroundColor: connected ? colors.safe : colors.warning }]} />
+      <Text selectable style={styles.deviceId}>{displayNodeId(nodeId)}</Text>
+      <Text style={[styles.deviceState, { color: connected ? colors.safe : colors.warning }]}>{state}</Text>
+    </View>
+  );
 }
 
 export function NetworkStatusScreen({
@@ -35,21 +62,31 @@ export function NetworkStatusScreen({
   showBleDiagnostics,
 }: NetworkStatusScreenProps) {
   const [syncing, setSyncing] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const nativeBle = activity.transportMode === 'NATIVE_BLE';
+  const connectedDevices = useMemo(
+    () => [...activity.connectedPeerIds].sort((left, right) => left.localeCompare(right)),
+    [activity.connectedPeerIds],
+  );
+  const nearbyDevices = useMemo(() => {
+    const connected = new Set(activity.connectedPeerIds);
+    return [...(activity.discoveredPeerIds ?? [])]
+      .filter((nodeId) => !connected.has(nodeId))
+      .sort((left, right) => left.localeCompare(right));
+  }, [activity.connectedPeerIds, activity.discoveredPeerIds]);
 
   async function runDemoGatewaySync(): Promise<void> {
     setSyncing(true);
     try {
       const response = await onDemoGatewaySync();
       Alert.alert(
-        'Mock gateway acknowledged',
-        `${response.acknowledgedMessageIds.length} queued message${response.acknowledgedMessageIds.length === 1 ? '' : 's'} acknowledged. This is the development gateway boundary, not a production backend.`,
+        'Demo sync complete',
+        response.acknowledgedMessageIds.length === 0
+          ? 'There were no new reports waiting to send.'
+          : `${response.acknowledgedMessageIds.length} report${response.acknowledgedMessageIds.length === 1 ? '' : 's'} reached the demo network.`,
       );
     } catch (error) {
-      Alert.alert(
-        'Gateway sync failed',
-        error instanceof Error ? error.message : 'Unacknowledged messages remain queued.',
-      );
+      Alert.alert('Could not sync', error instanceof Error ? error.message : 'Reports remain saved on this phone.');
     } finally {
       setSyncing(false);
     }
@@ -60,14 +97,13 @@ export function NetworkStatusScreen({
     try {
       const response = await onBackendSync();
       Alert.alert(
-        'Backend sync complete',
-        `${response.acknowledgedMessageIds.length} message${response.acknowledgedMessageIds.length === 1 ? '' : 's'} acknowledged by the real local backend.`,
+        'Status checked',
+        response.acknowledgedMessageIds.length === 0
+          ? 'No new reports were waiting to send. Case updates are current.'
+          : `${response.acknowledgedMessageIds.length} report${response.acknowledgedMessageIds.length === 1 ? '' : 's'} reached the disaster network.`,
       );
-    } catch (error) {
-      Alert.alert(
-        'Backend unavailable',
-        error instanceof Error ? error.message : 'Unacknowledged messages remain queued locally.',
-      );
+    } catch {
+      Alert.alert('Network unavailable', 'Reports remain saved on this phone and will retry automatically.');
     } finally {
       setSyncing(false);
     }
@@ -78,7 +114,7 @@ export function NetworkStatusScreen({
     try {
       await onRetryNativeBle();
     } catch (error) {
-      Alert.alert('Bluetooth unavailable', error instanceof Error ? error.message : 'Could not restart Bluetooth mesh.');
+      Alert.alert('Bluetooth unavailable', error instanceof Error ? error.message : 'Could not restart Bluetooth sharing.');
     } finally {
       setSyncing(false);
     }
@@ -88,245 +124,385 @@ export function NetworkStatusScreen({
     setSyncing(true);
     try {
       const messageId = await onSendBleTestEnvelope();
-      Alert.alert('BLE test queued', `${messageId.slice(0, 12)} is queued locally. Peer receipt is not a gateway ACK.`);
+      Alert.alert('Test report queued', `${messageId.slice(0, 12)} is saved locally. A nearby receipt is not final delivery.`);
     } catch (error) {
-      Alert.alert('BLE test failed', error instanceof Error ? error.message : 'Test envelope remains unsent.');
+      Alert.alert('Test failed', error instanceof Error ? error.message : 'The test report was not sent.');
     } finally {
       setSyncing(false);
     }
   }
 
+  const gatewayCopy = activity.gatewayState === 'ACKNOWLEDGED'
+    ? 'Disaster network confirmed'
+    : activity.gatewayState === 'FAILED'
+      ? 'Disaster network unavailable'
+      : 'Waiting for disaster network';
+
   return (
-    <Screen title="Network status" subtitle="Delivery states are shown separately and never inferred from a local save." onBack={onBack}>
+    <Screen title="Network status" subtitle="Reports save on this phone first, even when every connection is unavailable." onBack={onBack}>
       <NetworkStatusPill health={health} />
-      <View style={styles.card}>
-        <Text style={styles.title}>{nativeBle ? 'Native Bluetooth Mesh' : 'Development Mesh'}</Text>
-        <Text style={styles.topology}>
-          {nativeBle
-            ? 'This phone ↔ nearby physical ResQNet phones'
-            : activity.transportMode === 'DEV_EMULATOR_MESH'
-            ? 'This app ↔ Mac broker ↔ separate emulator'
-            : 'This app → MOCK-B → MOCK-C → gateway boundary'}
+
+      <View style={styles.section}>
+        <Text accessibilityRole="header" style={styles.sectionTitle}>Connected devices</Text>
+        <Text style={styles.sectionDescription}>
+          Nearby ResQNet devices can carry reports onward. Their receipt does not mean authorities have received a report.
         </Text>
-        <Text style={styles.body}>
-          {nativeBle
-            ? 'Foreground BLE scans only for the ResQNet service. Peer receipt means nearby relay only; gateway delivery remains pending.'
-            : activity.transportMode === 'DEV_EMULATOR_MESH'
-            ? 'Serialized MeshEnvelope traffic leaves this app process over WebSocket. This is a development transport, not BLE or a backend.'
-            : 'A and C have no direct link. This is the in-process simulator; native BLE is not connected.'}
-        </Text>
-        <View style={styles.metrics}>
-          <Text style={styles.metric}>Node ID: {activity.nodeId}</Text>
-          <Text style={styles.metric}>Transport: {activity.transportMode.replaceAll('_', ' ')}</Text>
-          {nativeBle ? (
-            <>
-              <Text style={styles.metric}>Bluetooth: {activity.bluetoothEnabled ? 'ENABLED' : 'OFF / UNAVAILABLE'}</Text>
-              <Text style={styles.metric}>Radio: {activity.radioReady ? 'ADVERTISING + SCANNING' : 'NOT READY'}</Text>
-              <Text style={styles.metric}>Permission: {(activity.radioPermissionState ?? 'UNKNOWN').replaceAll('_', ' ')}</Text>
-              <Text style={styles.metric}>Nearby ResQNet peers: {activity.discoveredPeerIds?.length ?? 0}</Text>
-            </>
-          ) : (
-            <Text style={styles.metric}>Broker: {activity.brokerConnected ? 'CONNECTED' : 'DISCONNECTED'}</Text>
-          )}
-          <Text style={styles.metric}>Connected peers: {activity.connectedPeerIds.length}</Text>
-          {activity.connectedPeerIds.length > 0 ? (
-            <Text style={styles.peerIds}>{activity.connectedPeerIds.join(', ')}</Text>
-          ) : null}
-          <Text style={styles.metric}>Queued for gateway: {activity.queuedCount}</Text>
-          <Text style={styles.metric}>Received mesh messages: {activity.receivedCount}</Text>
-          <Text style={styles.metric}>Relayed sends: {activity.relayedCount}</Text>
-          <Text style={styles.metric}>Peer receipts: {activity.peerReceiptCount}</Text>
-          <Text style={styles.metric}>Gateway state: {activity.gatewayState.replaceAll('_', ' ')}</Text>
-          {showBackendSync ? <Text style={styles.metric}>Backend: {backendBaseUrl}</Text> : null}
-          <Text style={styles.metric}>Battery mode: {health.batteryMode.replaceAll('_', ' ')}</Text>
-        </View>
+        {connectedDevices.length > 0 ? (
+          <View style={styles.deviceList}>
+            {connectedDevices.map((nodeId) => <DeviceRow key={nodeId} nodeId={nodeId} state="Connected" />)}
+          </View>
+        ) : (
+          <View style={styles.emptyDevices}>
+            <Text style={styles.emptyTitle}>No devices connected right now</Text>
+            <Text style={styles.emptyBody}>
+              {activity.brokerConnected
+                ? 'The development relay is ready and waiting for another device.'
+                : nativeBle && activity.radioReady
+                  ? 'Bluetooth sharing is ready. Keep ResQNet open while looking for nearby phones.'
+                  : 'Your reports remain saved and will retry automatically.'}
+            </Text>
+          </View>
+        )}
+
+        {nativeBle && nearbyDevices.length > 0 ? (
+          <View style={styles.nearbyGroup}>
+            <Text style={styles.nearbyTitle}>Seen nearby, not connected</Text>
+            {nearbyDevices.map((nodeId) => <DeviceRow key={nodeId} nodeId={nodeId} state="Nearby" />)}
+          </View>
+        ) : null}
       </View>
-      <View style={styles.card}>
-        <Text style={styles.title}>Mesh activity</Text>
-        <Text style={styles.body}>{activity.lastActivity ?? 'No activity yet.'}</Text>
+
+      <View style={styles.section}>
+        <Text accessibilityRole="header" style={styles.sectionTitle}>Reports and relay</Text>
+        <View style={styles.statRow}>
+          <Text style={styles.statLabel}>Waiting to reach the network</Text>
+          <Text accessibilityLiveRegion="polite" style={styles.statValue}>{activity.queuedCount}</Text>
+        </View>
+        <View style={styles.statRow}>
+          <Text style={styles.statLabel}>Received from nearby devices</Text>
+          <Text accessibilityLiveRegion="polite" style={styles.statValue}>{activity.receivedCount}</Text>
+        </View>
+        <View style={styles.statRow}>
+          <Text style={styles.statLabel}>Shared with nearby devices</Text>
+          <Text accessibilityLiveRegion="polite" style={styles.statValue}>{activity.relayedCount}</Text>
+        </View>
+        <View style={styles.statRow}>
+          <Text style={styles.statLabel}>Central network</Text>
+          <Text accessibilityLiveRegion="polite" style={[styles.statValue, styles.gatewayValue]}>{gatewayCopy}</Text>
+        </View>
+        {showBackendSync ? (
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityState={{ busy: syncing, disabled: syncing }}
+            disabled={syncing}
+            onPress={() => void runBackendSync()}
+            style={[styles.primaryButton, syncing ? styles.disabled : null]}
+          >
+            <Text style={styles.primaryButtonText}>{syncing ? 'Checking…' : 'Check for updates'}</Text>
+          </TouchableOpacity>
+        ) : null}
+        {nativeBle && !activity.radioReady ? (
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityState={{ busy: syncing, disabled: syncing }}
+            disabled={syncing}
+            onPress={() => void retryBluetooth()}
+            style={[styles.secondaryButton, syncing ? styles.disabled : null]}
+          >
+            <Text style={styles.secondaryButtonText}>{syncing ? 'Checking…' : 'Try Bluetooth again'}</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+
+      <View style={styles.section}>
+        <Text accessibilityRole="header" style={styles.sectionTitle}>Latest activity</Text>
         {activity.lastReceived ? (
-          <View style={styles.lastReceived}>
-            <Text style={styles.receivedType}>{activity.lastReceived.messageType.replaceAll('_', ' ')}</Text>
-            <Text style={styles.receivedName}>Last received report: {activity.lastReceived.summary}</Text>
-            <Text style={styles.receivedMeta}>
-              {activity.lastReceived.messageId.slice(0, 12)} from {activity.lastReceived.fromNodeId ?? 'development peer'}
+          <View style={styles.activityPanel}>
+            <Text style={styles.activityEyebrow}>Received from {activity.lastReceived.fromNodeId ?? 'a nearby device'}</Text>
+            <Text style={styles.activityTitle}>{activity.lastReceived.summary}</Text>
+            <Text style={styles.activityBody}>
+              {MESSAGE_LABELS[activity.lastReceived.messageType] ?? 'network message'} received and saved once on this phone.
             </Text>
           </View>
         ) : (
-          <Text style={styles.body}>No peer envelope has been accepted on this installation.</Text>
+          <Text style={styles.sectionDescription}>No report has been received from another device on this installation.</Text>
         )}
+        <Text style={health.lastSuccessfulSyncTimestamp ? styles.syncSuccess : styles.syncPending}>
+          {health.lastSuccessfulSyncTimestamp
+            ? `Last central network contact: ${new Date(health.lastSuccessfulSyncTimestamp).toLocaleString()}`
+            : 'No central network confirmation yet.'}
+        </Text>
       </View>
-      <View style={styles.card}>
-        <Text style={styles.title}>Honest delivery states</Text>
-        <Text style={styles.item}>1. Saved locally — durable on this device</Text>
-        <Text style={styles.item}>2. Relaying — sent to a nearby {nativeBle ? 'Bluetooth peer' : 'simulated node'}</Text>
-        <Text style={styles.item}>3. Delivered — shown only after gateway/server ACK</Text>
+
+      <View style={styles.section}>
+        <Text accessibilityRole="header" style={styles.sectionTitle}>How delivery works</Text>
+        <View style={styles.deliveryStep}>
+          <Text style={styles.stepNumber}>1</Text>
+          <View style={styles.stepCopy}>
+            <Text style={styles.stepTitle}>Saved on this phone</Text>
+            <Text style={styles.stepBody}>The report is protected from a sudden connection loss.</Text>
+          </View>
+        </View>
+        <View style={styles.deliveryStep}>
+          <Text style={styles.stepNumber}>2</Text>
+          <View style={styles.stepCopy}>
+            <Text style={styles.stepTitle}>Sharing with nearby devices</Text>
+            <Text style={styles.stepBody}>Other ResQNet phones may carry it closer to a connection.</Text>
+          </View>
+        </View>
+        <View style={styles.deliveryStep}>
+          <Text style={styles.stepNumber}>3</Text>
+          <View style={styles.stepCopy}>
+            <Text style={styles.stepTitle}>Reached the disaster network</Text>
+            <Text style={styles.stepBody}>Shown only after the central coordination service confirms receipt.</Text>
+          </View>
+        </View>
       </View>
-      {health.lastSuccessfulSyncTimestamp ? (
-        <Text style={styles.sync}>Last acknowledged sync: {new Date(health.lastSuccessfulSyncTimestamp).toLocaleString()}</Text>
-      ) : (
-        <Text style={styles.pending}>No gateway/server acknowledgement received yet.</Text>
-      )}
-      {showDemoGateway ? (
-        <>
+
+      <Disclosure
+        expanded={advancedOpen}
+        label="Advanced diagnostics"
+        onPress={() => setAdvancedOpen((value) => !value)}
+      >
+        <View style={styles.diagnosticRows}>
+          <Text selectable style={styles.diagnostic}>Node ID: {activity.nodeId}</Text>
+          <Text style={styles.diagnostic}>Transport: {activity.transportMode.replaceAll('_', ' ')}</Text>
+          {nativeBle ? (
+            <>
+              <Text style={styles.diagnostic}>Bluetooth: {activity.bluetoothEnabled ? 'ENABLED' : 'OFF OR UNAVAILABLE'}</Text>
+              <Text style={styles.diagnostic}>Radio: {activity.radioReady ? 'ADVERTISING AND SCANNING' : 'NOT READY'}</Text>
+              <Text style={styles.diagnostic}>Permission: {(activity.radioPermissionState ?? 'UNKNOWN').replaceAll('_', ' ')}</Text>
+            </>
+          ) : (
+            <Text style={styles.diagnostic}>Development broker: {activity.brokerConnected ? 'CONNECTED' : 'DISCONNECTED'}</Text>
+          )}
+          <Text style={styles.diagnostic}>Peer receipts: {activity.peerReceiptCount}</Text>
+          <Text style={styles.diagnostic}>Gateway state: {activity.gatewayState.replaceAll('_', ' ')}</Text>
+          {showBackendSync ? <Text selectable style={styles.diagnostic}>Backend: {backendBaseUrl}</Text> : null}
+          <Text style={styles.diagnostic}>Battery mode: {health.batteryMode.replaceAll('_', ' ')}</Text>
+          <Text style={styles.diagnostic}>Last transport event: {activity.lastActivity ?? 'None'}</Text>
+        </View>
+        {showDemoGateway ? (
           <TouchableOpacity
             accessibilityRole="button"
+            accessibilityState={{ busy: syncing, disabled: syncing }}
             disabled={syncing}
             onPress={() => void runDemoGatewaySync()}
-            style={[styles.syncButton, syncing ? styles.syncButtonDisabled : null]}
+            style={[styles.secondaryButton, syncing ? styles.disabled : null]}
           >
-            <Text style={styles.syncButtonText}>{syncing ? 'SYNCING…' : 'RUN MOCK GATEWAY ACK'}</Text>
+            <Text style={styles.secondaryButtonText}>{syncing ? 'Running…' : 'Run demo network confirmation'}</Text>
           </TouchableOpacity>
-          <Text style={styles.demoNote}>Demo-only: proves ACK handling without claiming the production backend is connected.</Text>
-        </>
-      ) : (
-        <Text style={styles.demoNote}>Peer receipt does not remove an item from the gateway queue.</Text>
-      )}
-      {showBackendSync ? (
-        <TouchableOpacity
-          accessibilityRole="button"
-          disabled={syncing}
-          onPress={() => void runBackendSync()}
-          style={[styles.syncButton, syncing ? styles.syncButtonDisabled : null]}
-        >
-          <Text style={styles.syncButtonText}>{syncing ? 'SYNCING…' : 'SYNC WITH REAL BACKEND'}</Text>
-        </TouchableOpacity>
-      ) : null}
-      {nativeBle ? (
-        <TouchableOpacity
-          accessibilityRole="button"
-          disabled={syncing}
-          onPress={() => void retryBluetooth()}
-          style={[styles.syncButton, syncing ? styles.syncButtonDisabled : null]}
-        >
-          <Text style={styles.syncButtonText}>{syncing ? 'CHECKING…' : 'RETRY BLUETOOTH'}</Text>
-        </TouchableOpacity>
-      ) : null}
-      {nativeBle && showBleDiagnostics ? (
-        <TouchableOpacity
-          accessibilityRole="button"
-          disabled={syncing}
-          onPress={() => void sendTestEnvelope()}
-          style={[styles.diagnosticButton, syncing ? styles.syncButtonDisabled : null]}
-        >
-          <Text style={styles.diagnosticButtonText}>SEND TEST ENVELOPE</Text>
-        </TouchableOpacity>
-      ) : null}
+        ) : null}
+        {nativeBle && showBleDiagnostics ? (
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityState={{ busy: syncing, disabled: syncing }}
+            disabled={syncing}
+            onPress={() => void sendTestEnvelope()}
+            style={[styles.secondaryButton, syncing ? styles.disabled : null]}
+          >
+            <Text style={styles.secondaryButtonText}>Send test envelope</Text>
+          </TouchableOpacity>
+        ) : null}
+      </Disclosure>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
+  section: {
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    paddingVertical: spacing.xl,
+  },
+  sectionTitle: {
+    color: colors.textStrong,
+    ...typography.sectionTitle,
+  },
+  sectionDescription: {
+    color: colors.muted,
+    ...typography.body,
+    marginTop: spacing.xs,
+  },
+  deviceList: {
+    marginTop: spacing.md,
+    gap: spacing.xs,
+  },
+  deviceRow: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 14,
-    padding: 16,
-    marginTop: 14,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
   },
-  title: {
-    color: colors.text,
-    fontSize: 17,
-    fontWeight: '900',
+  deviceDot: {
+    width: 9,
+    height: 9,
+    borderRadius: radii.pill,
+    marginRight: spacing.sm,
   },
-  topology: {
-    color: colors.info,
-    fontSize: 16,
-    fontWeight: '900',
-    marginTop: 10,
+  deviceId: {
+    flex: 1,
+    minWidth: 0,
+    color: colors.textStrong,
+    ...typography.label,
   },
-  body: {
-    color: colors.muted,
-    lineHeight: 21,
-    marginTop: 8,
-  },
-  metrics: {
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    marginTop: 14,
-    paddingTop: 8,
-  },
-  metric: {
-    color: colors.text,
+  deviceState: {
+    ...typography.caption,
     fontWeight: '700',
-    marginTop: 6,
+    marginLeft: spacing.sm,
   },
-  peerIds: {
+  emptyDevices: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radii.md,
+    marginTop: spacing.md,
+    padding: spacing.md,
+  },
+  emptyTitle: {
+    color: colors.textStrong,
+    ...typography.bodyStrong,
+  },
+  emptyBody: {
     color: colors.muted,
-    fontSize: 12,
-    marginTop: 3,
+    ...typography.caption,
+    marginTop: spacing.xxs,
   },
-  lastReceived: {
-    backgroundColor: colors.background,
-    borderRadius: 10,
-    marginTop: 12,
-    padding: 12,
+  nearbyGroup: {
+    marginTop: spacing.lg,
+    gap: spacing.xs,
   },
-  receivedType: {
-    color: colors.info,
-    fontSize: 12,
-    fontWeight: '900',
-  },
-  receivedName: {
-    color: colors.text,
-    fontSize: 16,
-    fontWeight: '900',
-    marginTop: 4,
-  },
-  receivedMeta: {
+  nearbyTitle: {
     color: colors.muted,
-    fontSize: 12,
-    marginTop: 4,
+    ...typography.label,
   },
-  item: {
+  statRow: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    gap: spacing.md,
+  },
+  statLabel: {
+    flex: 1,
     color: colors.text,
-    lineHeight: 22,
-    marginTop: 7,
+    ...typography.label,
   },
-  pending: {
-    color: colors.warning,
-    fontWeight: '800',
-    marginTop: 16,
+  statValue: {
+    color: colors.textStrong,
+    ...typography.bodyStrong,
+    textAlign: 'right',
   },
-  sync: {
-    color: colors.safe,
-    fontWeight: '800',
-    marginTop: 16,
+  gatewayValue: {
+    flex: 1,
+    color: colors.primary,
+    fontSize: 13,
   },
-  syncButton: {
+  primaryButton: {
     minHeight: 52,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 12,
-    backgroundColor: colors.info,
-    marginTop: 18,
+    backgroundColor: colors.primary,
+    borderRadius: radii.md,
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.md,
   },
-  syncButtonDisabled: {
-    opacity: 0.6,
+  primaryButtonText: {
+    color: colors.onAccent,
+    ...typography.button,
   },
-  syncButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '900',
-  },
-  demoNote: {
-    color: colors.muted,
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: 7,
-  },
-  diagnosticButton: {
-    minHeight: 48,
+  secondaryButton: {
+    minHeight: 50,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.info,
-    marginTop: 10,
+    borderColor: colors.borderStrong,
+    borderRadius: radii.md,
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.md,
   },
-  diagnosticButtonText: {
+  secondaryButtonText: {
+    color: colors.primary,
+    ...typography.bodyStrong,
+    textAlign: 'center',
+  },
+  disabled: {
+    opacity: 0.58,
+  },
+  activityPanel: {
+    backgroundColor: colors.infoTint,
+    borderRadius: radii.md,
+    marginTop: spacing.md,
+    padding: spacing.md,
+  },
+  activityEyebrow: {
     color: colors.info,
-    fontWeight: '900',
+    ...typography.caption,
+    fontWeight: '700',
+  },
+  activityTitle: {
+    color: colors.textStrong,
+    ...typography.bodyStrong,
+    marginTop: spacing.xxs,
+  },
+  activityBody: {
+    color: colors.text,
+    ...typography.caption,
+    marginTop: spacing.xxs,
+  },
+  syncSuccess: {
+    color: colors.safe,
+    ...typography.caption,
+    fontWeight: '600',
+    marginTop: spacing.md,
+  },
+  syncPending: {
+    color: colors.warning,
+    ...typography.caption,
+    fontWeight: '600',
+    marginTop: spacing.md,
+  },
+  deliveryStep: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: spacing.md,
+  },
+  stepNumber: {
+    width: 28,
+    height: 28,
+    borderRadius: radii.pill,
+    backgroundColor: colors.primaryTint,
+    color: colors.primary,
+    fontSize: 14,
+    lineHeight: 28,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  stepCopy: {
+    flex: 1,
+    minWidth: 0,
+    marginLeft: spacing.sm,
+  },
+  stepTitle: {
+    color: colors.textStrong,
+    ...typography.bodyStrong,
+  },
+  stepBody: {
+    color: colors.muted,
+    ...typography.caption,
+    marginTop: 1,
+  },
+  diagnosticRows: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radii.md,
+    padding: spacing.md,
+  },
+  diagnostic: {
+    color: colors.text,
+    ...typography.caption,
+    marginBottom: spacing.xs,
   },
 });

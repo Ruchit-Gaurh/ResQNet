@@ -1,65 +1,117 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import type { NetworkHealthStatus } from '../../../shared/types/index';
-import { colors } from '../theme';
+import { colors, radii, spacing, typography } from '../theme';
 
 const PRESENTATION: Record<
   NetworkHealthStatus['connectivity'],
-  { icon: string; label: string; color: string }
+  { label: string; detail: (health: NetworkHealthStatus) => string; color: string }
 > = {
-  INTERNET_CONNECTED: { icon: '●', label: 'Internet Connected', color: colors.safe },
-  MESH_CONNECTED: { icon: '●', label: 'Mesh Connected', color: colors.warning },
-  OFFLINE_QUEUED: { icon: '●', label: 'Offline — Queued', color: colors.sighting },
-  ISOLATED: { icon: '●', label: 'Isolated', color: colors.isolated },
+  INTERNET_CONNECTED: {
+    label: 'Disaster network available',
+    detail: () => 'Reports can reach the coordination service',
+    color: colors.safe,
+  },
+  MESH_CONNECTED: {
+    label: 'Nearby network available',
+    detail: (health) => `${health.nearbyPeerCount} nearby device${health.nearbyPeerCount === 1 ? '' : 's'}`,
+    color: colors.warning,
+  },
+  OFFLINE_QUEUED: {
+    label: 'Offline, saved on this phone',
+    detail: (health) => `${health.queuedMessageCount} report${health.queuedMessageCount === 1 ? '' : 's'} waiting to send`,
+    color: colors.sighting,
+  },
+  ISOLATED: {
+    label: 'No network connection',
+    detail: () => 'New reports will still be saved on this phone',
+    color: colors.isolated,
+  },
 };
 
 interface NetworkStatusPillProps {
   health: NetworkHealthStatus;
+  onPress?: () => void;
 }
 
-export function NetworkStatusPill({ health }: NetworkStatusPillProps) {
+export function NetworkStatusPill({ health, onPress }: NetworkStatusPillProps) {
   const state = PRESENTATION[health.connectivity];
-  return (
-    <View accessibilityLabel={`Network status: ${state.label}`} style={styles.container}>
-      <Text style={[styles.icon, { color: state.color }]}>{state.icon}</Text>
+  const spokenText = `Network status: ${state.label}. ${state.detail(health)}`;
+  const content = (
+    <>
+      <View accessible={false} style={[styles.dot, { backgroundColor: state.color }]} />
       <View style={styles.textArea}>
         <Text style={styles.label}>{state.label}</Text>
-        <Text style={styles.detail}>
-          {health.connectivity === 'MESH_CONNECTED'
-            ? `${health.nearbyPeerCount} nearby peer${health.nearbyPeerCount === 1 ? '' : 's'}`
-            : `${health.queuedMessageCount} message${health.queuedMessageCount === 1 ? '' : 's'} queued`}
-        </Text>
+        <Text style={styles.detail}>{state.detail(health)}</Text>
       </View>
+      {onPress ? <Text accessible={false} style={styles.chevron}>›</Text> : null}
+    </>
+  );
+
+  if (onPress) {
+    return (
+      <TouchableOpacity
+        accessibilityHint="Opens network status and connected device details"
+        accessibilityLabel={spokenText}
+        accessibilityLiveRegion="polite"
+        accessibilityRole="button"
+        activeOpacity={0.72}
+        onPress={onPress}
+        style={styles.container}
+      >
+        {content}
+      </TouchableOpacity>
+    );
+  }
+
+  return (
+    <View
+      accessibilityLabel={spokenText}
+      accessibilityLiveRegion="polite"
+      accessible
+      style={styles.container}
+    >
+      {content}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
+    minHeight: 64,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 10,
   },
-  icon: {
-    fontSize: 23,
-    marginRight: 10,
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: radii.pill,
+    marginRight: spacing.sm,
   },
   textArea: {
     flex: 1,
+    minWidth: 0,
   },
   label: {
-    color: colors.text,
-    fontSize: 16,
-    fontWeight: '900',
+    color: colors.textStrong,
+    ...typography.label,
+    fontWeight: '700',
   },
   detail: {
     color: colors.muted,
-    fontSize: 13,
-    marginTop: 2,
+    ...typography.caption,
+    marginTop: 1,
+  },
+  chevron: {
+    color: colors.muted,
+    fontSize: 28,
+    lineHeight: 30,
+    marginLeft: spacing.xs,
   },
 });

@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { Alert } from 'react-native';
 
+import { Disclosure } from '../components/Disclosure';
 import { FormField } from '../components/FormField';
+import { FormSection } from '../components/FormSection';
 import { PhotoField } from '../components/PhotoField';
 import { Screen } from '../components/Screen';
 import { SubmitButton } from '../components/SubmitButton';
@@ -20,20 +22,30 @@ export function SightingReportScreen({ submissions, onBack, onSaved }: SightingR
   const [zone, setZone] = useState('');
   const [clothing, setClothing] = useState('');
   const [direction, setDirection] = useState('');
-  const [timeSeen, setTimeSeen] = useState('');
+  const [minutesAgo, setMinutesAgo] = useState('');
   const [notes, setNotes] = useState('');
   const [photoUri, setPhotoUri] = useState<string>();
+  const [showEarlierTime, setShowEarlierTime] = useState(false);
+  const [showMore, setShowMore] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  const hasUnsavedChanges = showEarlierTime || [caseId, description, zone, clothing, direction, minutesAgo, notes, photoUri].some(
+    (value) => Boolean(value?.trim()),
+  );
 
   async function submit(): Promise<void> {
     if (!zone.trim() || !description.trim()) {
       Alert.alert('Description and zone needed', 'A sighting needs a basic description and where it occurred.');
       return;
     }
-    const parsedTime = timeSeen.trim() ? Date.parse(timeSeen.trim()) : undefined;
-    if (parsedTime !== undefined && !Number.isFinite(parsedTime)) {
-      Alert.alert('Check the time', 'Use a recognizable date/time or leave it blank to use the current time.');
-      return;
+    let timestamp: string | undefined;
+    if (showEarlierTime) {
+      const parsedMinutes = Number.parseInt(minutesAgo.trim(), 10);
+      if (!Number.isFinite(parsedMinutes) || parsedMinutes <= 0) {
+        Alert.alert('Check when you saw them', 'Enter roughly how many minutes ago the sighting happened.');
+        return;
+      }
+      timestamp = new Date(Date.now() - parsedMinutes * 60_000).toISOString();
     }
     setBusy(true);
     try {
@@ -43,15 +55,15 @@ export function SightingReportScreen({ submissions, onBack, onSaved }: SightingR
         zone,
         clothingDescription: clothing,
         directionOfMovement: direction,
-        timestamp: parsedTime === undefined ? undefined : new Date(parsedTime).toISOString(),
+        timestamp,
         photoUri,
         notes,
       });
       Alert.alert(
-        'Sighting saved — unverified',
+        'Sighting saved, not yet verified',
         result.deliveryState === 'RELAYING'
-          ? 'Relaying through the development mesh. This is not a confirmed identification.'
-          : 'Saved locally. This is not a confirmed identification.',
+          ? 'Saved on this phone and sharing with nearby devices. It has not reached the disaster network yet. Responders must verify this information.'
+          : 'Saved on this phone. ResQNet will keep trying to share it. Responders must verify this information.',
       );
       onSaved();
     } catch (error) {
@@ -62,16 +74,60 @@ export function SightingReportScreen({ submissions, onBack, onSaved }: SightingR
   }
 
   return (
-    <Screen title="Report a sighting" subtitle="A sighting is unverified information, not a confirmed identity." onBack={onBack}>
-      <FormField label="Related case ID" placeholder="If known" value={caseId} onChangeText={setCaseId} />
-      <FormField label="Person description" optional={false} multiline placeholder="Approximate appearance" value={description} onChangeText={setDescription} />
-      <FormField label="Zone / location" optional={false} placeholder="Zone A, near Gate 4" value={zone} onChangeText={setZone} />
-      <FormField label="Clothing" placeholder="Clothing description" value={clothing} onChangeText={setClothing} />
-      <FormField label="Direction of movement" placeholder="Toward Sector 5" value={direction} onChangeText={setDirection} />
-      <FormField label="Time seen" placeholder="Blank uses current time" value={timeSeen} onChangeText={setTimeSeen} />
-      <PhotoField photoUri={photoUri} onChange={setPhotoUri} />
-      <FormField label="Notes" multiline placeholder="Time or other context" value={notes} onChangeText={setNotes} />
-      <SubmitButton label="SAVE UNVERIFIED SIGHTING" busy={busy} color={colors.sighting} onPress={() => void submit()} />
+    <Screen
+      title="Report a sighting"
+      subtitle="This helps responders investigate. It does not confirm anyone’s identity."
+      onBack={onBack}
+      hasUnsavedChanges={hasUnsavedChanges}
+    >
+      <FormSection title="What did you see?">
+        <FormField
+          label="Person description"
+          optional={false}
+          multiline
+          placeholder="Describe their approximate appearance"
+          value={description}
+          onChangeText={setDescription}
+        />
+      </FormSection>
+
+      <FormSection title="Where and when?" description="The sighting time is set to now unless you change it.">
+        <FormField
+          label="Zone or location"
+          optional={false}
+          placeholder="Example: Zone A, near Gate 4"
+          value={zone}
+          onChangeText={setZone}
+        />
+        <Disclosure
+          label="The sighting happened earlier"
+          expanded={showEarlierTime}
+          onPress={() => setShowEarlierTime((current) => !current)}
+        >
+          <FormField
+            label="About how many minutes ago?"
+            optional={false}
+            keyboardType="number-pad"
+            placeholder="Example: 30"
+            value={minutesAgo}
+            onChangeText={setMinutesAgo}
+          />
+        </Disclosure>
+      </FormSection>
+
+      <Disclosure
+        label="Add photo, clothing, or other details"
+        expanded={showMore}
+        onPress={() => setShowMore((current) => !current)}
+      >
+        <PhotoField photoUri={photoUri} onChange={setPhotoUri} />
+        <FormField label="Clothing" placeholder="Describe what they were wearing" value={clothing} onChangeText={setClothing} />
+        <FormField label="Direction of movement" placeholder="Example: Toward Sector 5" value={direction} onChangeText={setDirection} />
+        <FormField label="Related case reference" placeholder="Only if you know it" value={caseId} onChangeText={setCaseId} />
+        <FormField label="Notes" multiline placeholder="Anything else responders should know" value={notes} onChangeText={setNotes} />
+      </Disclosure>
+
+      <SubmitButton label="Save unverified sighting" busy={busy} color={colors.sighting} onPress={() => void submit()} />
     </Screen>
   );
 }

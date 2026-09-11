@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { Alert } from 'react-native';
 
+import { Disclosure } from '../components/Disclosure';
 import { FormField } from '../components/FormField';
+import { FormSection } from '../components/FormSection';
 import { PhotoField } from '../components/PhotoField';
 import { Screen } from '../components/Screen';
 import { SubmitButton } from '../components/SubmitButton';
@@ -26,7 +28,12 @@ export function MissingReportScreen({ submissions, onBack, onSaved }: MissingRep
   const [clothing, setClothing] = useState('');
   const [zone, setZone] = useState('');
   const [details, setDetails] = useState('');
+  const [showMore, setShowMore] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  const hasUnsavedChanges = [name, age, photoUri, clothing, zone, details].some((value) =>
+    Boolean(value?.trim()),
+  );
 
   async function submit(): Promise<void> {
     if (![name, age, photoUri, clothing, zone, details].some((value) => Boolean(value?.trim()))) {
@@ -44,9 +51,14 @@ export function MissingReportScreen({ submissions, onBack, onSaved }: MissingRep
         details,
       });
       const message = result.deliveryState === 'RELAYING'
-        ? 'Saved locally and relaying through the development mesh. Peer receipt is not gateway delivery.'
-        : 'Saved locally — waiting for connectivity.';
-      Alert.alert('Report saved', result.transportError ? `${message}\n\nRelay issue: ${result.transportError}` : message);
+        ? 'Saved on this phone and sharing with nearby devices. It has not reached the disaster network yet.'
+        : 'Saved on this phone. ResQNet will keep trying to share it when a connection is available.';
+      Alert.alert(
+        'Missing person report saved',
+        result.transportError
+          ? 'Your report is safe on this phone. It could not be shared yet, so ResQNet will keep trying.'
+          : message,
+      );
       onSaved();
     } catch (error) {
       Alert.alert('Could not save report', error instanceof Error ? error.message : 'Local storage failed.');
@@ -58,16 +70,55 @@ export function MissingReportScreen({ submissions, onBack, onSaved }: MissingRep
   return (
     <Screen
       title="Someone is missing"
-      subtitle="Share whatever you know. Only one useful detail is required."
+      subtitle="Share what you know. One useful detail is enough."
       onBack={onBack}
+      hasUnsavedChanges={hasUnsavedChanges}
     >
-      <FormField label="Name" placeholder="Full name, nickname, or unknown" value={name} onChangeText={setName} />
-      <FormField label="Approximate age" keyboardType="number-pad" placeholder="Example: 22" value={age} onChangeText={setAge} />
-      <PhotoField photoUri={photoUri} onChange={setPhotoUri} />
-      <FormField label="Clothing" placeholder="Blue shirt, black trousers" value={clothing} onChangeText={setClothing} />
-      <FormField label="Last known zone / location" placeholder="Zone A, Sector 4" value={zone} onChangeText={setZone} />
-      <FormField label="Identifying details or notes" multiline placeholder="Marks, height, circumstances…" value={details} onChangeText={setDetails} />
-      <SubmitButton label="SAVE MISSING REPORT" busy={busy} color={colors.missing} onPress={() => void submit()} />
+      <FormSection
+        title="Who are you looking for?"
+        description="A name or photo helps, but neither is required."
+      >
+        <FormField label="Name or nickname" placeholder="Enter any name you know" value={name} onChangeText={setName} />
+        <FormField
+          label="Best estimate of age"
+          keyboardType="number-pad"
+          placeholder="Example: 22"
+          value={age}
+          onChangeText={setAge}
+        />
+        <PhotoField photoUri={photoUri} onChange={setPhotoUri} />
+      </FormSection>
+
+      <FormSection title="Where were they last seen?">
+        <FormField
+          label="Zone or location"
+          placeholder="Example: Zone A, Sector 4"
+          value={zone}
+          onChangeText={setZone}
+        />
+      </FormSection>
+
+      <Disclosure
+        label="Add clothing or identifying details"
+        expanded={showMore}
+        onPress={() => setShowMore((current) => !current)}
+      >
+        <FormField
+          label="Clothing"
+          placeholder="Example: Blue shirt, black trousers"
+          value={clothing}
+          onChangeText={setClothing}
+        />
+        <FormField
+          label="Identifying details or notes"
+          multiline
+          placeholder="Marks, height, or what happened"
+          value={details}
+          onChangeText={setDetails}
+        />
+      </Disclosure>
+
+      <SubmitButton label="Save missing person report" busy={busy} color={colors.missing} onPress={() => void submit()} />
     </Screen>
   );
 }

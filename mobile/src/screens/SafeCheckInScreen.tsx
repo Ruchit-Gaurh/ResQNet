@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { Alert } from 'react-native';
 
+import { Disclosure } from '../components/Disclosure';
 import { FormField } from '../components/FormField';
+import { FormSection } from '../components/FormSection';
 import { Screen } from '../components/Screen';
 import { SubmitButton } from '../components/SubmitButton';
 import type { ReportSubmissionService } from '../services/ReportSubmissionService';
@@ -19,7 +21,10 @@ export function SafeCheckInScreen({ submissions, onBack, onSaved }: SafeCheckInS
   const [phone, setPhone] = useState('');
   const [note, setNote] = useState('');
   const [family, setFamily] = useState('');
+  const [showMore, setShowMore] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  const hasUnsavedChanges = [name, zone, phone, note, family].some((value) => Boolean(value.trim()));
 
   async function submit(): Promise<void> {
     if (!name.trim() || !zone.trim()) {
@@ -38,8 +43,8 @@ export function SafeCheckInScreen({ submissions, onBack, onSaved }: SafeCheckInS
       Alert.alert(
         'Safe check-in saved',
         result.deliveryState === 'RELAYING'
-          ? 'Saved locally and relaying through the development mesh. Peer receipt is not gateway delivery.'
-          : 'Saved locally — waiting for connectivity.',
+          ? 'Saved on this phone and sharing with nearby devices. It has not reached the disaster network yet.'
+          : 'Saved on this phone. ResQNet will keep trying to share it when a connection is available.',
       );
       onSaved();
     } catch (error) {
@@ -50,13 +55,46 @@ export function SafeCheckInScreen({ submissions, onBack, onSaved }: SafeCheckInS
   }
 
   return (
-    <Screen title="I'm safe" subtitle="A quick check-in. Name and safe zone are enough." onBack={onBack}>
-      <FormField label="Your name" optional={false} placeholder="Name" value={name} onChangeText={setName} />
-      <FormField label="Current safe zone" optional={false} placeholder="School shelter, Camp 2…" value={zone} onChangeText={setZone} />
-      <FormField label="Phone / contact" keyboardType="phone-pad" placeholder="If safe to share" value={phone} onChangeText={setPhone} />
-      <FormField label="Short note" placeholder="Safe and unhurt" value={note} onChangeText={setNote} />
-      <FormField label="Family member names" placeholder="Comma separated" value={family} onChangeText={setFamily} />
-      <SubmitButton label="MARK ME SAFE" busy={busy} color={colors.safe} onPress={() => void submit()} />
+    <Screen
+      title="I'm safe"
+      subtitle="A quick check-in can help family know you are okay."
+      onBack={onBack}
+      hasUnsavedChanges={hasUnsavedChanges}
+    >
+      <FormSection title="Share your safe status" description="Only your name and current safe place are needed.">
+        <FormField label="Your name" optional={false} placeholder="Enter your name" value={name} onChangeText={setName} />
+        <FormField
+          label="Where are you safe?"
+          optional={false}
+          placeholder="Example: School shelter or Camp 2"
+          value={zone}
+          onChangeText={setZone}
+        />
+      </FormSection>
+
+      <Disclosure
+        label="Add family or contact details"
+        expanded={showMore}
+        onPress={() => setShowMore((current) => !current)}
+      >
+        <FormField
+          label="Phone or contact"
+          keyboardType="phone-pad"
+          placeholder="Only if it is safe to share"
+          value={phone}
+          onChangeText={setPhone}
+        />
+        <FormField
+          label="Family member names"
+          helperText="Separate multiple names with commas."
+          placeholder="Who may be looking for you?"
+          value={family}
+          onChangeText={setFamily}
+        />
+        <FormField label="Short note" placeholder="Example: Safe and unhurt" value={note} onChangeText={setNote} />
+      </Disclosure>
+
+      <SubmitButton label="Share that I'm safe" busy={busy} color={colors.safe} onPress={() => void submit()} />
     </Screen>
   );
 }
