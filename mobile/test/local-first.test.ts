@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import type { MeshEnvelope } from '../../shared/types/index';
+import type { DisasterCase, MeshEnvelope } from '../../shared/types/index';
+import { FetchGatewayClient } from '../../mesh/MeshTransportService';
 import { MockMeshNetwork, MockMeshTransport } from '../../mesh/mock/MockMeshTransport';
 import { InMemoryLocalStorage, LocalQueueService } from '../src/services/LocalQueueService';
 import { getOrCreateDevNodeId } from '../src/services/DevNodeIdentity';
@@ -164,4 +165,80 @@ test('received peer envelope is deduplicated and does not become an owned case',
 
   assert.equal((await localQueue.getReceivedRecords()).length, 1);
   assert.equal((await localQueue.getCases()).length, 0);
+});
+
+test('gateway reconciliation updates owned cases without importing another family case', async () => {
+  const fixedNow = 1_700_000_000_000;
+  const storage = new InMemoryLocalStorage();
+  const localQueue = new LocalQueueService(storage, () => fixedNow);
+  const network = new MockMeshNetwork();
+  const mesh = new MockMeshTransport('PHONE-A', network);
+  await mesh.init();
+  const submissions = new ReportSubmissionService(localQueue, mesh, {
+    senderPseudonym: 'MOBILE-PHONE-A',
+    createId: idFactory(),
+    now: () => fixedNow,
+  });
+  await submissions.submitMissing({ name: 'Owned person' });
+  const owned = (await localQueue.getCases())[0] as DisasterCase;
+  const serverOwned = { ...owned, status: 'FAMILY_NOTIFIED' as const, verificationState: 'VERIFIED' as const };
+  const remote = { ...owned, caseId: 'CASE-REMOTE', person: { ...owned.person, name: 'Another family' } };
+
+  await localQueue.applySyncResponse({
+    acknowledgedMessageIds: [],
+    inboundCases: [serverOwned, remote],
+    inboundMatches: [],
+    inboundTimelineEvents: [
+      {
+        eventId: 'owned-event',
+        caseId: owned.caseId,
+        timestamp: new Date(fixedNow + 1).toISOString(),
+        source: 'RESPONDER',
+        title: 'Human verification completed',
+        description: 'Authorized backend update',
+        verificationStatus: 'VERIFIED',
+      },
+      {
+        eventId: 'remote-event',
+        caseId: remote.caseId,
+        timestamp: new Date(fixedNow + 1).toISOString(),
+        source: 'RESPONDER',
+        title: 'Private remote event',
+        description: 'Must not be imported',
+        verificationStatus: 'VERIFIED',
+      },
+    ],
+    serverTimestamp: fixedNow + 1,
+  });
+
+  const reconciled = await localQueue.getCases();
+  assert.equal(reconciled.length, 1);
+  assert.equal(reconciled[0]?.status, 'FAMILY_NOTIFIED');
+  assert.equal((await localQueue.getTimeline(owned.caseId)).length, 1);
+  assert.equal((await localQueue.getTimeline(remote.caseId)).length, 0);
+});
+
+test('HTTP gateway client sends bearer auth and validates real ACK response', async () => {
+  let authorization: string | null = null;
+  const client = new FetchGatewayClient({
+    getAccessToken: async () => 'development-token',
+    fetchImpl: async (_input, init) => {
+      authorization = new Headers(init?.headers).get('Authorization');
+      return new Response(JSON.stringify({
+        acknowledgedMessageIds: ['message-1'],
+        inboundCases: [],
+        inboundMatches: [],
+        inboundTimelineEvents: [],
+        serverTimestamp: 123,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    },
+  });
+
+  const response = await client.sync('http://gateway.test/', {
+    deviceId: 'PHONE-A',
+    lastSyncTimestamp: 0,
+    outboundEnvelopes: [],
+  });
+  assert.equal(authorization, 'Bearer development-token');
+  assert.deepEqual(response.acknowledgedMessageIds, ['message-1']);
 });

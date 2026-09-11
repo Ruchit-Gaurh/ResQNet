@@ -12,9 +12,12 @@ interface NetworkStatusScreenProps {
   activity: MobileMeshActivity;
   onBack: () => void;
   onDemoGatewaySync: () => Promise<{ acknowledgedMessageIds: string[] }>;
+  onBackendSync: () => Promise<{ acknowledgedMessageIds: string[] }>;
   onRetryNativeBle: () => Promise<void>;
   onSendBleTestEnvelope: () => Promise<string>;
   showDemoGateway: boolean;
+  showBackendSync: boolean;
+  backendBaseUrl: string;
   showBleDiagnostics: boolean;
 }
 
@@ -23,9 +26,12 @@ export function NetworkStatusScreen({
   activity,
   onBack,
   onDemoGatewaySync,
+  onBackendSync,
   onRetryNativeBle,
   onSendBleTestEnvelope,
   showDemoGateway,
+  showBackendSync,
+  backendBaseUrl,
   showBleDiagnostics,
 }: NetworkStatusScreenProps) {
   const [syncing, setSyncing] = useState(false);
@@ -43,6 +49,24 @@ export function NetworkStatusScreen({
       Alert.alert(
         'Gateway sync failed',
         error instanceof Error ? error.message : 'Unacknowledged messages remain queued.',
+      );
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function runBackendSync(): Promise<void> {
+    setSyncing(true);
+    try {
+      const response = await onBackendSync();
+      Alert.alert(
+        'Backend sync complete',
+        `${response.acknowledgedMessageIds.length} message${response.acknowledgedMessageIds.length === 1 ? '' : 's'} acknowledged by the real local backend.`,
+      );
+    } catch (error) {
+      Alert.alert(
+        'Backend unavailable',
+        error instanceof Error ? error.message : 'Unacknowledged messages remain queued locally.',
       );
     } finally {
       setSyncing(false);
@@ -113,6 +137,7 @@ export function NetworkStatusScreen({
           <Text style={styles.metric}>Relayed sends: {activity.relayedCount}</Text>
           <Text style={styles.metric}>Peer receipts: {activity.peerReceiptCount}</Text>
           <Text style={styles.metric}>Gateway state: {activity.gatewayState.replaceAll('_', ' ')}</Text>
+          {showBackendSync ? <Text style={styles.metric}>Backend: {backendBaseUrl}</Text> : null}
           <Text style={styles.metric}>Battery mode: {health.batteryMode.replaceAll('_', ' ')}</Text>
         </View>
       </View>
@@ -157,6 +182,16 @@ export function NetworkStatusScreen({
       ) : (
         <Text style={styles.demoNote}>Peer receipt does not remove an item from the gateway queue.</Text>
       )}
+      {showBackendSync ? (
+        <TouchableOpacity
+          accessibilityRole="button"
+          disabled={syncing}
+          onPress={() => void runBackendSync()}
+          style={[styles.syncButton, syncing ? styles.syncButtonDisabled : null]}
+        >
+          <Text style={styles.syncButtonText}>{syncing ? 'SYNCING…' : 'SYNC WITH REAL BACKEND'}</Text>
+        </TouchableOpacity>
+      ) : null}
       {nativeBle ? (
         <TouchableOpacity
           accessibilityRole="button"

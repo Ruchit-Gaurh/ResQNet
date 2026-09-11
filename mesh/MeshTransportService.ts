@@ -29,6 +29,11 @@ export interface GatewayClient {
   sync(gatewayUrl: string, request: SyncBatchRequest): Promise<SyncBatchResponse>;
 }
 
+export interface FetchGatewayClientOptions {
+  getAccessToken?: () => Promise<string | undefined>;
+  fetchImpl?: typeof fetch;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -59,12 +64,16 @@ export function validateSyncBatchResponse(value: unknown): SyncBatchResponse {
 }
 
 export class FetchGatewayClient implements GatewayClient {
+  constructor(private readonly options: FetchGatewayClientOptions = {}) {}
+
   async sync(gatewayUrl: string, request: SyncBatchRequest): Promise<SyncBatchResponse> {
     const normalizedUrl = gatewayUrl.replace(/\/$/, '');
-    const response = await fetch(`${normalizedUrl}/api/v1/sync/batch`, {
+    const accessToken = await this.options.getAccessToken?.();
+    const response = await (this.options.fetchImpl ?? fetch)(`${normalizedUrl}/api/v1/sync/batch`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       },
       body: JSON.stringify(request),
     });

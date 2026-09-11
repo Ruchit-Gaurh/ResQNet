@@ -104,11 +104,22 @@ function AppContent() {
 
   const onSaved = useCallback(() => {
     void refreshHealth();
+    if (services.canSyncBackend) {
+      void services.syncBackend().then(refreshHealth).catch((error: unknown) => {
+        console.info('Report remains local until backend connectivity returns.', error);
+      });
+    }
     setRoute('CASES');
-  }, [refreshHealth]);
+  }, [refreshHealth, services]);
 
   const syncDemoGateway = useCallback(async () => {
     const response = await services.syncDemoGateway();
+    await refreshHealth();
+    return response;
+  }, [refreshHealth, services]);
+
+  const syncBackend = useCallback(async () => {
+    const response = await services.syncBackend();
     await refreshHealth();
     return response;
   }, [refreshHealth, services]);
@@ -141,7 +152,13 @@ function AppContent() {
     case 'SIGHTING':
       return <SightingReportScreen submissions={services.submissions} onBack={() => setRoute('HOME')} onSaved={onSaved} />;
     case 'CASES':
-      return <FamilyDashboardScreen localQueue={services.localQueue} onBack={() => setRoute('HOME')} />;
+      return (
+        <FamilyDashboardScreen
+          localQueue={services.localQueue}
+          onBack={() => setRoute('HOME')}
+          onRefreshServer={services.canSyncBackend ? syncBackend : undefined}
+        />
+      );
     case 'NETWORK':
       return (
         <NetworkStatusScreen
@@ -149,9 +166,12 @@ function AppContent() {
           activity={meshActivity}
           onBack={() => setRoute('HOME')}
           onDemoGatewaySync={syncDemoGateway}
+          onBackendSync={syncBackend}
           onRetryNativeBle={() => services.retryNativeBle()}
           onSendBleTestEnvelope={() => services.sendBleTestEnvelope()}
           showDemoGateway={services.canRunDemoGateway}
+          showBackendSync={services.canSyncBackend}
+          backendBaseUrl={services.backendBaseUrl}
           showBleDiagnostics={services.transportMode === 'NATIVE_BLE' && __DEV__}
         />
       );

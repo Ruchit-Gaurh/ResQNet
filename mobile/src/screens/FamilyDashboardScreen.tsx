@@ -13,15 +13,16 @@ import { colors } from '../theme';
 interface FamilyDashboardScreenProps {
   localQueue: LocalQueueService;
   onBack: () => void;
+  onRefreshServer?: () => Promise<unknown>;
 }
 
 const VERIFIED_STATUSES = new Set<CaseStatus>(['VERIFIED', 'FAMILY_NOTIFIED', 'REUNITED', 'CLOSED']);
 
 const DELIVERY_LABEL: Record<DeliveryState, string> = {
   SAVED_LOCALLY: 'Saved locally — waiting for connectivity',
-  RELAYING: 'Relaying through the development mesh',
-  REACHED_PEER: 'Reached a development peer — waiting for gateway',
-  DELIVERED_TO_NETWORK: 'Delivered — mock gateway acknowledged',
+  RELAYING: 'Relaying through the selected mesh transport',
+  REACHED_PEER: 'Reached a nearby peer — waiting for gateway',
+  DELIVERED_TO_NETWORK: 'Delivered to disaster network — backend acknowledged',
 };
 
 function caseIdFromRecord(record: LocalQueueRecord): string | undefined {
@@ -72,13 +73,16 @@ function statusPresentation(status: CaseStatus): { label: string; background: st
   if (status === 'REUNITED') {
     return { label: 'PERSON LOCATED / VERIFIED', background: '#D3F9D8', foreground: '#065F46' };
   }
+  if (status === 'FAMILY_NOTIFIED') {
+    return { label: 'PERSON LOCATED / FAMILY NOTIFIED', background: '#D3F9D8', foreground: '#065F46' };
+  }
   if (VERIFIED_STATUSES.has(status)) {
     return { label: 'VERIFIED UPDATE', background: '#D3F9D8', foreground: '#065F46' };
   }
   return { label: status.replaceAll('_', ' '), background: '#E7EEF8', foreground: colors.text };
 }
 
-export function FamilyDashboardScreen({ localQueue, onBack }: FamilyDashboardScreenProps) {
+export function FamilyDashboardScreen({ localQueue, onBack, onRefreshServer }: FamilyDashboardScreenProps) {
   const [cases, setCases] = useState<DisasterCase[]>([]);
   const [timelines, setTimelines] = useState<Record<string, CaseTimelineEvent[]>>({});
   const [records, setRecords] = useState<LocalQueueRecord[]>([]);
@@ -109,10 +113,26 @@ export function FamilyDashboardScreen({ localQueue, onBack }: FamilyDashboardScr
     return localQueue.subscribe(() => void refresh());
   }, [localQueue, refresh]);
 
+  const refreshServer = useCallback(async () => {
+    if (!onRefreshServer) {
+      await refresh();
+      return;
+    }
+    setLoading(true);
+    setError(undefined);
+    try {
+      await onRefreshServer();
+      await refresh();
+    } catch (syncError) {
+      setError(syncError instanceof Error ? syncError.message : 'Backend is unavailable; local cases are unchanged.');
+      setLoading(false);
+    }
+  }, [onRefreshServer, refresh]);
+
   return (
     <Screen title="My cases" subtitle="Possible matches remain unconfirmed until human verification." onBack={onBack}>
-      <TouchableOpacity onPress={() => void refresh()} style={styles.refresh}>
-        <Text style={styles.refreshText}>Refresh local status</Text>
+      <TouchableOpacity onPress={() => void refreshServer()} style={styles.refresh}>
+        <Text style={styles.refreshText}>{onRefreshServer ? 'Refresh server status' : 'Refresh local status'}</Text>
       </TouchableOpacity>
       {loading ? <ActivityIndicator color={colors.info} size="large" /> : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}

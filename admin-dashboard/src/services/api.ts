@@ -1,0 +1,503 @@
+import { DisasterCase, MatchCandidate, DisasterZone, FacilityLocation, MeshNodeStatus, VerificationAuditEntry, PhoneMeshCluster } from '../types';
+import { INITIAL_CASES, INITIAL_MATCHES, INITIAL_ZONES, INITIAL_FACILITIES, INITIAL_MESH_NODES, INITIAL_AUDIT_LOGS, INITIAL_PHONE_CLUSTERS } from './mockData';
+
+type Listener = () => void;
+
+class ApiService {
+  private isLiveBackend: boolean = true;
+  private backendBaseUrl: string = '/api/v1';
+  private directBackendUrl: string = 'http://localhost:4000/api/v1';
+  private authToken: string | null = null;
+
+  // In-memory reactive state (always available as fallback & immediate cache)
+  private cases: DisasterCase[] = [...INITIAL_CASES];
+  private matches: MatchCandidate[] = [...INITIAL_MATCHES];
+  private zones: DisasterZone[] = [...INITIAL_ZONES];
+  private facilities: FacilityLocation[] = [...INITIAL_FACILITIES];
+  private meshNodes: MeshNodeStatus[] = [...INITIAL_MESH_NODES];
+  private auditLogs: VerificationAuditEntry[] = [...INITIAL_AUDIT_LOGS];
+  private listeners: Set<Listener> = new Set();
+
+  constructor() {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('RESQNET_USE_LIVE_BACKEND');
+      // Default to live backend enabled
+      this.isLiveBackend = stored !== null ? stored === 'true' : true;
+    }
+  }
+
+  public setMode(useLive: boolean) {
+    this.isLiveBackend = useLive;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('RESQNET_USE_LIVE_BACKEND', useLive ? 'true' : 'false');
+    }
+    this.notify();
+  }
+
+  public isLive(): boolean {
+    return this.isLiveBackend;
+  }
+
+  public subscribe(listener: Listener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private notify() {
+    this.listeners.forEach((l) => l());
+  }
+
+  // --- Auth Token Management ---
+
+  private async getAuthToken(): Promise<string | null> {
+    if (this.authToken) return this.authToken;
+    try {
+      // First try proxied /api/v1/auth/token, then fallback to direct port 4000
+      let res: Response;
+      try {
+        res = await fetch(`${this.backendBaseUrl}/auth/token`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'RESPONDER_ADMIN', userId: 'admin-ruchit' })
+        });
+      } catch {
+        res = await fetch(`${this.directBackendUrl}/auth/token`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'RESPONDER_ADMIN', userId: 'admin-ruchit' })
+        });
+      }
+
+      if (res.ok) {
+        const json = await res.json();
+        this.authToken = json.token;
+        return this.authToken;
+      }
+    } catch (err) {
+      console.warn('Unable to get auth token from backend:', err);
+    }
+    return null;
+  }
+
+  private async authFetch(endpoint: string, options: RequestInit = {}): Promise<Response> {
+    const token = await this.getAuthToken();
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...((options.headers as Record<string, string>) || {})
+    };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    try {
+      return await fetch(`${this.backendBaseUrl}${endpoint}`, {
+        ...options,
+        headers
+      });
+    } catch {
+      // Fallback to direct URL if Vite proxy is bypassed
+      return await fetch(`${this.directBackendUrl}${endpoint}`, {
+        ...options,
+        headers
+      });
+    }
+  }
+
+  public async checkBackendHealth(): Promise<{ online: boolean; port: number; service?: string }> {
+    try {
+      const res = await fetch('/health');
+      if (res.ok) {
+        const data = await res.json();
+        return { online: true, port: 4000, service: data.service };
+      }
+    } catch {
+      try {
+        const fallbackRes = await fetch('http://localhost:4000/health');
+        if (fallbackRes.ok) {
+          const data = await fallbackRes.json();
+          return { online: true, port: 4000, service: data.service };
+        }
+      } catch {
+        return { online: false, port: 4000 };
+      }
+    }
+    return { online: false, port: 4000 };
+  }
+
+  // --- Case Endpoints ---
+
+  public async getCases(filters?: { type?: string; status?: string; zone?: string }): Promise<DisasterCase[]> {
+    if (this.isLiveBackend) {
+      try {
+        const params = new URLSearchParams();
+        if (filters?.type) params.set('type', filters.type);
+        if (filters?.status) params.set('status', filters.status);
+        if (filters?.zone) params.set('zone', filters.zone);
+
+        const url = `/cases${params.toString() ? `?${params.toString()}` : ''}`;
+        const res = await this.authFetch(url);
+        if (res.ok) {
+          const json = await res.json();
+          const remoteCases = json.cases || json;
+          if (Array.isArray(remoteCases)) {
+            this.cases = remoteCases;
+            return remoteCases;
+          }
+        }
+      } catch (err) {
+        console.warn('Live backend unreachable, falling back to local state', err);
+      }
+    }
+
+    let result = [...this.cases];
+    if (filters?.type) {
+      result = result.filter((c) => c.type === filters.type);
+    }
+    if (filters?.status) {
+      result = result.filter((c) => c.status === filters.status);
+    }
+    if (filters?.zone) {
+      result = result.filter((c) => c.lastKnownLocation?.zone?.includes(filters.zone!));
+    }
+    return result;
+  }
+
+  public async getCaseById(caseId: string): Promise<DisasterCase | null> {
+    if (this.isLiveBackend) {
+      try {
+        const res = await this.authFetch(`/cases/${caseId}`);
+        if (res.ok) {
+          const json = await res.json();
+          return json;
+        }
+      } catch (err) {
+        console.warn('Live backend getCaseById unreachable, falling back to cache', err);
+      }
+    }
+    const found = this.cases.find((c) => c.caseId === caseId);
+    return found || null;
+  }
+
+  public async addCase(newCase: DisasterCase): Promise<void> {
+    this.cases = [newCase, ...this.cases];
+
+    if (this.isLiveBackend) {
+      try {
+        const endpoint = newCase.type === 'MISSING' ? '/cases/missing' : '/cases/found';
+        const payload = newCase.type === 'MISSING' ? {
+          person: newCase.person,
+          priority: newCase.priority,
+          lastKnownLocation: newCase.lastKnownLocation,
+          lastKnownTime: newCase.lastKnownTime,
+          source: newCase.source
+        } : {
+          person: newCase.person,
+          location: newCase.lastKnownLocation,
+          source: newCase.source
+        };
+
+        await this.authFetch(endpoint, {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+      } catch (err) {
+        console.warn('Failed to sync new case to backend', err);
+      }
+    }
+
+    this.notify();
+  }
+
+  // --- Match & Verification Endpoints ---
+
+  public async getPendingMatches(): Promise<MatchCandidate[]> {
+    if (this.isLiveBackend) {
+      try {
+        const res = await this.authFetch('/admin/matches/pending');
+        if (res.ok) {
+          const json = await res.json();
+          const remoteMatches = json.matches || json;
+          if (Array.isArray(remoteMatches)) {
+            return remoteMatches;
+          }
+        }
+      } catch (err) {
+        console.warn('Live backend unreachable, using local matches', err);
+      }
+    }
+    return this.matches.filter((m) => m.status === 'PENDING_REVIEW');
+  }
+
+  public async getAllMatches(): Promise<MatchCandidate[]> {
+    if (this.isLiveBackend) {
+      try {
+        const res = await this.authFetch('/admin/matches');
+        if (res.ok) {
+          const json = await res.json();
+          const remoteMatches = json.matches || json;
+          if (Array.isArray(remoteMatches)) {
+            this.matches = remoteMatches;
+            return remoteMatches;
+          }
+        }
+      } catch (err) {
+        console.warn('Live backend getAllMatches unreachable, using cache', err);
+      }
+    }
+    return [...this.matches];
+  }
+
+  public async verifyMatch(
+    matchId: string,
+    reviewerName: string,
+    notes?: string,
+    evidenceUsed: string[] = ['EVID-PHOTO-SIMILARITY', 'EVID-PHYSICAL-IDENTIFIERS']
+  ): Promise<{ success: boolean; message: string }> {
+    if (this.isLiveBackend) {
+      const response = await this.authFetch(`/admin/matches/${matchId}/verify`, {
+        method: 'POST',
+        body: JSON.stringify({
+          decision: 'VERIFY',
+          reviewerId: reviewerName,
+          notes: notes || 'Verified identity by responder',
+          evidenceUsed
+        })
+      });
+      if (!response.ok) {
+        throw new Error(`Backend verification failed with HTTP ${response.status}.`);
+      }
+      await Promise.all([this.getCases(), this.getAllMatches()]);
+      this.notify();
+      return { success: true, message: 'Identity confirmed by the backend. Family notified.' };
+    }
+
+    const match = this.matches.find((m) => m.matchId === matchId);
+    if (match) {
+      match.status = 'VERIFIED';
+      match.reviewerId = reviewerName;
+      match.reviewedAt = new Date().toISOString();
+      match.reviewNotes = notes;
+    }
+
+    const targetCase = this.cases.find((c) => c.caseId === match?.targetMissingCaseId);
+    const candidateCase = this.cases.find((c) => c.caseId === match?.candidateFoundCaseId);
+
+    if (targetCase) {
+      targetCase.status = 'VERIFIED';
+      targetCase.verificationState = 'VERIFIED';
+      targetCase.updatedAt = new Date().toISOString();
+    }
+    if (candidateCase) {
+      candidateCase.status = 'VERIFIED';
+      candidateCase.verificationState = 'VERIFIED';
+      candidateCase.updatedAt = new Date().toISOString();
+    }
+
+    const auditEntry: VerificationAuditEntry = {
+      id: `AUDIT-${Date.now()}`,
+      matchId,
+      missingCaseId: match?.targetMissingCaseId || 'CASE-TARGET',
+      candidateCaseId: match?.candidateFoundCaseId || 'CASE-CANDIDATE',
+      missingPersonName: targetCase?.person.name || 'Subject',
+      candidatePersonName: candidateCase?.person.name || 'Candidate',
+      decision: 'VERIFY',
+      reviewerName,
+      timestamp: new Date().toISOString(),
+      notes,
+      evidenceItems: evidenceUsed
+    };
+    this.auditLogs = [auditEntry, ...this.auditLogs];
+
+    this.notify();
+    return { success: true, message: 'Identity confirmed in local demonstration data.' };
+  }
+
+  public async rejectMatch(matchId: string, reviewerName: string, notes?: string): Promise<void> {
+    if (this.isLiveBackend) {
+      const response = await this.authFetch(`/admin/matches/${matchId}/verify`, {
+        method: 'POST',
+        body: JSON.stringify({
+          decision: 'REJECT',
+          reviewerId: reviewerName,
+          notes: notes || 'Rejected candidate match',
+          evidenceUsed: ['REVIEWER_DISCRETION']
+        })
+      });
+      if (!response.ok) {
+        throw new Error(`Backend rejection failed with HTTP ${response.status}.`);
+      }
+      await this.getAllMatches();
+      this.notify();
+      return;
+    }
+
+    const match = this.matches.find((m) => m.matchId === matchId);
+    if (match) {
+      match.status = 'REJECTED';
+      match.reviewerId = reviewerName;
+      match.reviewedAt = new Date().toISOString();
+      match.reviewNotes = notes;
+    }
+
+    const auditEntry: VerificationAuditEntry = {
+      id: `AUDIT-${Date.now()}`,
+      matchId,
+      missingCaseId: match?.targetMissingCaseId || 'CASE-TARGET',
+      candidateCaseId: match?.candidateFoundCaseId || 'CASE-CANDIDATE',
+      missingPersonName: match?.targetMissingCaseId || 'Target Case',
+      candidatePersonName: match?.candidateFoundCaseId || 'Candidate Case',
+      decision: 'REJECT',
+      reviewerName,
+      timestamp: new Date().toISOString(),
+      notes,
+      evidenceItems: ['REVIEWER_DISCRETION']
+    };
+    this.auditLogs = [auditEntry, ...this.auditLogs];
+
+    this.notify();
+  }
+
+  // --- Duplicate Consolidation ---
+
+  public async mergeCases(
+    canonicalCaseId: string,
+    duplicateCaseIds: string[],
+    reason: string
+  ): Promise<{ success: boolean; message: string }> {
+    const canonical = this.cases.find((c) => c.caseId === canonicalCaseId);
+    if (!canonical) return { success: false, message: 'Canonical case not found' };
+
+    duplicateCaseIds.forEach((dupId) => {
+      const dup = this.cases.find((c) => c.caseId === dupId);
+      if (dup) {
+        dup.status = 'DUPLICATE';
+        canonical.evidenceIds = Array.from(new Set([...canonical.evidenceIds, ...dup.evidenceIds, dup.caseId]));
+      }
+    });
+    canonical.updatedAt = new Date().toISOString();
+
+    const auditEntry: VerificationAuditEntry = {
+      id: `AUDIT-MERGE-${Date.now()}`,
+      matchId: `MERGE-${canonicalCaseId}`,
+      missingCaseId: canonicalCaseId,
+      candidateCaseId: duplicateCaseIds.join(', '),
+      missingPersonName: canonical.person.name,
+      candidatePersonName: 'Consolidated Duplicates',
+      decision: 'VERIFY',
+      reviewerName: 'Admin (Ruchit)',
+      timestamp: new Date().toISOString(),
+      notes: `Merged duplicate reports into canonical case: ${reason}`,
+      evidenceItems: canonical.evidenceIds
+    };
+    this.auditLogs = [auditEntry, ...this.auditLogs];
+
+    if (this.isLiveBackend) {
+      try {
+        await this.authFetch('/admin/cases/merge', {
+          method: 'POST',
+          body: JSON.stringify({
+            canonicalCaseId,
+            duplicateCaseIds,
+            reason
+          })
+        });
+        await this.getCases();
+      } catch (err) {
+        console.warn('Backend merge cases sync failed', err);
+      }
+    }
+
+    this.notify();
+    return { success: true, message: `Successfully consolidated ${duplicateCaseIds.length} records into ${canonicalCaseId}. Original provenance preserved.` };
+  }
+
+  // --- Infrastructure & Map ---
+
+  public async getZones(): Promise<DisasterZone[]> {
+    if (this.isLiveBackend) {
+      try {
+        const res = await this.authFetch('/telemetry/zones');
+        if (res.ok) {
+          const json = await res.json();
+          if (json.zones?.length) {
+            this.zones = json.zones;
+            return json.zones;
+          }
+        }
+      } catch { /* Fallback */ }
+    }
+    return this.zones;
+  }
+
+  public async getFacilities(): Promise<FacilityLocation[]> {
+    if (this.isLiveBackend) {
+      try {
+        const res = await this.authFetch('/telemetry/facilities');
+        if (res.ok) {
+          const json = await res.json();
+          if (json.facilities?.length) {
+            this.facilities = json.facilities;
+            return json.facilities;
+          }
+        }
+      } catch { /* Fallback */ }
+    }
+    return this.facilities;
+  }
+
+  public async getMeshNodes(): Promise<MeshNodeStatus[]> {
+    if (this.isLiveBackend) {
+      try {
+        const res = await this.authFetch('/telemetry/mesh-nodes');
+        if (res.ok) {
+          const json = await res.json();
+          if (json.nodes?.length) {
+            this.meshNodes = json.nodes;
+            return json.nodes;
+          }
+        }
+      } catch { /* Fallback */ }
+    }
+    return this.meshNodes;
+  }
+
+  public async getAuditLogs(): Promise<VerificationAuditEntry[]> {
+    if (this.isLiveBackend) {
+      try {
+        const res = await this.authFetch('/admin/audit-logs');
+        if (res.ok) {
+          const json = await res.json();
+          if (json.logs?.length) {
+            return json.logs;
+          }
+        }
+      } catch { /* Fallback */ }
+    }
+    return this.auditLogs;
+  }
+
+  public async getPhoneClusters(): Promise<PhoneMeshCluster[]> {
+    if (this.isLiveBackend) {
+      try {
+        const res = await this.authFetch('/telemetry/phone-clusters');
+        if (res.ok) {
+          const json = await res.json();
+          if (json.clusters?.length) {
+            return json.clusters;
+          }
+        }
+      } catch { /* Fallback */ }
+    }
+    return INITIAL_PHONE_CLUSTERS;
+  }
+
+  public resetMockData() {
+    this.cases = JSON.parse(JSON.stringify(INITIAL_CASES));
+    this.matches = JSON.parse(JSON.stringify(INITIAL_MATCHES));
+    this.meshNodes = JSON.parse(JSON.stringify(INITIAL_MESH_NODES));
+    this.auditLogs = JSON.parse(JSON.stringify(INITIAL_AUDIT_LOGS));
+    this.notify();
+  }
+}
+
+export const apiService = new ApiService();

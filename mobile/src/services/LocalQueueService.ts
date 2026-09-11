@@ -158,11 +158,19 @@ export class LocalQueueService {
   async applySyncResponse(response: SyncBatchResponse): Promise<void> {
     await this.markDelivered(response.acknowledgedMessageIds);
     await this.withMutation(async () => {
-      await this.upsertCasesInternal(response.inboundCases);
+      // A mesh peer may gateway another person's envelope. My Cases must only
+      // reconcile server state for cases already created on this installation.
+      const localCases = await this.readArray<DisasterCase>(CASES_KEY);
+      const ownedCaseIds = new Set(localCases.map((item) => item.caseId));
+      await this.upsertCasesInternal(
+        response.inboundCases.filter((item) => ownedCaseIds.has(item.caseId)),
+      );
       const timeline = await this.readArray<CaseTimelineEvent>(TIMELINE_KEY);
       const byId = new Map(timeline.map((event) => [event.eventId, event]));
       for (const event of response.inboundTimelineEvents) {
-        byId.set(event.eventId, event);
+        if (ownedCaseIds.has(event.caseId)) {
+          byId.set(event.eventId, event);
+        }
       }
       await this.writeArray(TIMELINE_KEY, [...byId.values()]);
     });

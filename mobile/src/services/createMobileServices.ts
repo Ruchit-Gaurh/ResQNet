@@ -1,7 +1,10 @@
 import { randomUUID } from 'expo-crypto';
 import { Platform } from 'react-native';
 
-import type { MeshTransportService } from '../../../mesh/MeshTransportService';
+import {
+  FetchGatewayClient,
+  type MeshTransportService,
+} from '../../../mesh/MeshTransportService';
 import {
   DevMeshTransport,
   type DevMeshActivity,
@@ -25,6 +28,7 @@ import { getOrCreateDevNodeId } from './DevNodeIdentity';
 import { LocalQueueService, type ReceivedMeshRecord } from './LocalQueueService';
 import { ReportSubmissionService } from './ReportSubmissionService';
 import { AndroidBleRadioPort } from './AndroidBleRadioPort';
+import { DevelopmentBackendAuth } from './DevelopmentBackendAuth';
 
 export type MobileMeshMode = 'MOCK_IN_PROCESS' | 'DEV_EMULATOR_MESH' | 'NATIVE_BLE';
 
@@ -58,13 +62,22 @@ export interface MobileServices {
   readonly submissions: ReportSubmissionService;
   readonly transportMode: MobileMeshMode;
   readonly canRunDemoGateway: boolean;
+  readonly canSyncBackend: boolean;
+  readonly backendBaseUrl: string;
   initialize(): Promise<void>;
   getMeshActivity(): Promise<MobileMeshActivity>;
   subscribeMeshActivity(callback: () => void): () => void;
   shutdown(): void;
   syncDemoGateway(): Promise<SyncBatchResponse>;
+  syncBackend(): Promise<SyncBatchResponse>;
   retryNativeBle(): Promise<void>;
   sendBleTestEnvelope(): Promise<string>;
+}
+
+function configuredBackendBaseUrl(): string {
+  const configured = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
+  if (configured) return configured.replace(/\/$/, '');
+  return Platform.OS === 'android' ? 'http://10.0.2.2:4000' : 'http://127.0.0.1:4000';
 }
 
 function configuredMode(): MobileMeshMode {
@@ -92,6 +105,9 @@ function summaryFromRecord(record: ReceivedMeshRecord): string {
 
 export function createMobileServices(): MobileServices {
   const mode = configuredMode();
+  const backendBaseUrl = configuredBackendBaseUrl();
+  const canSyncBackend =
+    mode === 'DEV_EMULATOR_MESH' || Boolean(process.env.EXPO_PUBLIC_API_BASE_URL?.trim());
   const localQueue = new LocalQueueService(asyncStorageAdapter);
   const subscribers = new Set<() => void>();
   let mesh: MeshTransportService | undefined;
@@ -103,6 +119,8 @@ export function createMobileServices(): MobileServices {
   let nativeMesh: NativeBleMeshTransport | undefined;
   let shutdownTransport: (() => void) | undefined;
   let initialized = false;
+  let backendSyncTimer: ReturnType<typeof setInterval> | undefined;
+  let backendSyncInFlight: Promise<SyncBatchResponse> | undefined;
 
   const notify = () => {
     for (const subscriber of subscribers) subscriber();
@@ -121,6 +139,8 @@ export function createMobileServices(): MobileServices {
     localQueue,
     transportMode: mode,
     canRunDemoGateway: mode === 'MOCK_IN_PROCESS',
+    canSyncBackend,
+    backendBaseUrl,
 
     async initialize(): Promise<void> {
       if (initialized) return;
@@ -131,6 +151,13 @@ export function createMobileServices(): MobileServices {
       const persistentDedup = new Deduplicator(
         new KeyValueSeenMessageStore(asyncStorageAdapter, '@resqnet/mobile-mesh-seen/v1'),
       );
+      const developmentAuth = new DevelopmentBackendAuth(
+        backendBaseUrl,
+        `mobile-${nodeId}`,
+      );
+      const gatewayClient = new FetchGatewayClient({
+        getAccessToken: __DEV__ ? () => developmentAuth.getAccessToken() : undefined,
+      });
 
       if (mode === 'NATIVE_BLE') {
         // The radio driver and its honest capability/error state are native;
@@ -138,6 +165,7 @@ export function createMobileServices(): MobileServices {
         nativeMesh = new NativeBleMeshTransport(nodeId, new AndroidBleRadioPort(), {
           queue: persistentQueue,
           deduplicator: persistentDedup,
+          gatewayClient,
           createEphemeralTag: randomUUID,
         });
         mesh = nativeMesh;
@@ -163,6 +191,7 @@ export function createMobileServices(): MobileServices {
         const devMesh = new DevMeshTransport(nodeId, brokerUrl, {
           queue: persistentQueue,
           deduplicator: persistentDedup,
+          gatewayClient,
         });
         mesh = devMesh;
         shutdownTransport = () => devMesh.shutdown();
@@ -218,6 +247,16 @@ export function createMobileServices(): MobileServices {
         createId: randomUUID,
       });
       initialized = true;
+      if (canSyncBackend) {
+        backendSyncTimer = setInterval(() => {
+          void this.syncBackend().catch((error: unknown) => {
+            console.info('Backend sync unavailable; local queue retained.', error);
+          });
+        }, 4_000);
+        void this.syncBackend().catch((error: unknown) => {
+          console.info('Initial backend sync unavailable; local queue retained.', error);
+        });
+      }
       notify();
     },
 
@@ -302,6 +341,8 @@ export function createMobileServices(): MobileServices {
     },
 
     shutdown(): void {
+      if (backendSyncTimer) clearInterval(backendSyncTimer);
+      backendSyncTimer = undefined;
       shutdownTransport?.();
     },
 
@@ -313,6 +354,19 @@ export function createMobileServices(): MobileServices {
       await localQueue.applySyncResponse(response);
       notify();
       return response;
+    },
+
+    async syncBackend(): Promise<SyncBatchResponse> {
+      if (!canSyncBackend || !submissions) {
+        throw new Error('Real backend sync is not enabled for this transport mode.');
+      }
+      if (!backendSyncInFlight) {
+        backendSyncInFlight = submissions.syncWithGateway(backendBaseUrl).finally(() => {
+          backendSyncInFlight = undefined;
+          notify();
+        });
+      }
+      return backendSyncInFlight;
     },
 
     async retryNativeBle(): Promise<void> {
