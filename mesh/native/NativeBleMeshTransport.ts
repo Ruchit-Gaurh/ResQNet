@@ -320,7 +320,9 @@ export class NativeBleMeshTransport implements MeshTransportService {
       inboundCharacteristicUuid: RESQNET_BLE_INBOUND_UUID,
       outboundCharacteristicUuid: RESQNET_BLE_OUTBOUND_UUID,
       rotationMs: DEFAULT_ADVERTISEMENT_ROTATION_MS,
-      ephemeralTag: this.options.createEphemeralTag(),
+      // The persisted, pseudonymous node ID is encoded into the four-byte BLE
+      // tag so this phone and its peers display one consistent device name.
+      ephemeralTag: this.nodeId,
     });
     await this.radio.startScanning(RESQNET_BLE_SERVICE_UUID);
     // Advertising/scanning failures can arrive as native events while these

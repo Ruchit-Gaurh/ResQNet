@@ -41,6 +41,11 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 private const val MANUFACTURER_ID = 0x5251
+// Legacy Android advertisements are limited to 31 bytes. Flags (3 bytes), the
+// 128-bit ResQNet service UUID (18 bytes), and manufacturer framing (4 bytes)
+// leave 6 bytes. Keep the rotating pseudonymous tag at 4 bytes so the packet
+// fits across phones that do not support extended advertising.
+private const val ADVERTISEMENT_TAG_BYTES = 4
 private const val DEFAULT_FRAME_BYTES = 20
 private const val REQUESTED_MTU = 247
 private const val PEER_EVENT_THROTTLE_MS = 5_000L
@@ -261,10 +266,21 @@ class ResQNetBleModule : Module() {
   }
 
   private fun rotatingTag(): ByteArray {
-    val bucket = System.currentTimeMillis() / rotationMs
-    return MessageDigest.getInstance("SHA-256")
-      .digest("$ephemeralSeed:$bucket".toByteArray(Charsets.UTF_8))
-      .copyOfRange(0, 8)
+    // Mobile persists identities as NODE-XXXXXXXX. Advertising those four
+    // pseudonymous bytes lets both phones show the same stable ResQNet name
+    // without exposing an Android Bluetooth address or any report data.
+    val encodedNodeId = ephemeralSeed
+      .removePrefix("NODE-")
+      .takeIf { value ->
+        value.length == ADVERTISEMENT_TAG_BYTES * 2 &&
+          value.all { character -> character in '0'..'9' || character in 'A'..'F' || character in 'a'..'f' }
+      }
+      ?.chunked(2)
+      ?.map { it.toInt(16).toByte() }
+      ?.toByteArray()
+    return encodedNodeId ?: MessageDigest.getInstance("SHA-256")
+      .digest(ephemeralSeed.toByteArray(Charsets.UTF_8))
+      .copyOfRange(0, ADVERTISEMENT_TAG_BYTES)
   }
 
   private fun startScanning(serviceUuid: UUID) {
@@ -300,7 +316,7 @@ class ResQNetBleModule : Module() {
   private fun acceptScanResult(result: ScanResult) {
     val bytes = result.scanRecord?.getManufacturerSpecificData(MANUFACTURER_ID) ?: return
     if (bytes.isEmpty()) return
-    val peerId = "BLE-${bytes.joinToString("") { "%02X".format(it.toInt() and 0xFF) }}"
+    val peerId = "NODE-${bytes.joinToString("") { "%02X".format(it.toInt() and 0xFF) }}"
     val address = result.device.address
     peerIdByAddress[address]?.takeIf { it != peerId }?.let { oldPeer -> devicesByPeerId.remove(oldPeer) }
     peerIdByAddress[address] = peerId
@@ -590,6 +606,7 @@ class ResQNetBleModule : Module() {
   }
 
   private fun privateServerPeerId(device: BluetoothDevice): String {
+    peerIdByAddress[device.address]?.let { return it }
     val digest = MessageDigest.getInstance("SHA-256").digest(device.address.toByteArray(Charsets.UTF_8))
     return "GATT-${digest.copyOfRange(0, 6).joinToString("") { "%02X".format(it.toInt() and 0xFF) }}"
   }

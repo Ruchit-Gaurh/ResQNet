@@ -1,8 +1,11 @@
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import type { NetworkHealthStatus } from '../../../shared/types/index';
+import { DeliveryJourney } from '../components/DeliveryJourney';
+import { DemoOfflineControl } from '../components/DemoOfflineControl';
 import { NetworkStatusPill } from '../components/NetworkStatusPill';
 import { Screen } from '../components/Screen';
+import type { MobileMeshActivity } from '../services/createMobileServices';
 import { colors, radii, spacing, typography } from '../theme';
 
 export type AppRoute =
@@ -16,8 +19,12 @@ export type AppRoute =
   | 'SETTINGS';
 
 interface HomeScreenProps {
+  activity: MobileMeshActivity;
+  demoOffline: boolean;
+  demoModeBusy: boolean;
   health: NetworkHealthStatus;
   onNavigate: (route: AppRoute) => void;
+  onToggleDemoOffline: (enabled: boolean) => void;
 }
 
 interface EmergencyAction {
@@ -67,7 +74,14 @@ const ACTIONS: EmergencyAction[] = [
   },
 ];
 
-export function HomeScreen({ health, onNavigate }: HomeScreenProps) {
+export function HomeScreen({
+  activity,
+  demoOffline,
+  demoModeBusy,
+  health,
+  onNavigate,
+  onToggleDemoOffline,
+}: HomeScreenProps) {
   return (
     <Screen title="ResQNet" subtitle="Disaster response and family coordination">
       <NetworkStatusPill health={health} onPress={() => onNavigate('NETWORK')} />
@@ -106,6 +120,14 @@ export function HomeScreen({ health, onNavigate }: HomeScreenProps) {
           );
         })}
       </View>
+
+      <DeliveryJourney activity={activity} demoOffline={demoOffline} />
+      <DemoOfflineControl
+        busy={demoModeBusy}
+        compact
+        enabled={demoOffline}
+        onChange={onToggleDemoOffline}
+      />
 
       <TouchableOpacity
         accessibilityHint="View updates for reports created on this phone"

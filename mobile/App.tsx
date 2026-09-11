@@ -42,6 +42,8 @@ function AppContent() {
   const [route, setRoute] = useState<AppRoute>('HOME');
   const [health, setHealth] = useState<NetworkHealthStatus>(INITIAL_HEALTH);
   const [meshActivity, setMeshActivity] = useState<MobileMeshActivity>(INITIAL_ACTIVITY);
+  const [demoOffline, setDemoOffline] = useState(false);
+  const [demoModeBusy, setDemoModeBusy] = useState(false);
   const [ready, setReady] = useState(false);
   const [startupError, setStartupError] = useState<string>();
 
@@ -56,8 +58,9 @@ function AppContent() {
       (latest, record) => latest === undefined || record.updatedAt > latest ? record.updatedAt : latest,
       undefined,
     );
+    const offlineMode = services.isDemoOffline();
     const connectivity: NetworkHealthStatus['connectivity'] =
-      services.canSyncBackend && nextActivity.gatewayState === 'ACKNOWLEDGED'
+      !offlineMode && services.canSyncBackend && nextActivity.gatewayState === 'ACKNOWLEDGED'
         ? 'INTERNET_CONNECTED'
         : nextActivity.connectedPeerIds.length > 0
           ? 'MESH_CONNECTED'
@@ -84,6 +87,7 @@ function AppContent() {
           unsubscribe = services.subscribeMeshActivity(() => {
             if (active) void refreshHealth();
           });
+          setDemoOffline(services.isDemoOffline());
           await refreshHealth();
           setReady(true);
         }
@@ -102,13 +106,25 @@ function AppContent() {
 
   const onSaved = useCallback(() => {
     void refreshHealth();
-    if (services.canSyncBackend) {
+    if (services.canSyncBackend && !services.isDemoOffline()) {
       void services.syncBackend().then(refreshHealth).catch((error: unknown) => {
         console.info('Report remains local until backend connectivity returns.', error);
       });
     }
     setRoute('CASES');
   }, [refreshHealth, services]);
+
+  const toggleDemoOffline = useCallback(async (enabled: boolean) => {
+    if (demoModeBusy) return;
+    setDemoModeBusy(true);
+    try {
+      await services.setDemoOffline(enabled);
+      setDemoOffline(enabled);
+      await refreshHealth();
+    } finally {
+      setDemoModeBusy(false);
+    }
+  }, [demoModeBusy, refreshHealth, services]);
 
   const syncDemoGateway = useCallback(async () => {
     const response = await services.syncDemoGateway();
@@ -167,7 +183,7 @@ function AppContent() {
           localQueue={services.localQueue}
           onBack={() => setRoute('HOME')}
           onReportMissing={() => setRoute('MISSING')}
-          onRefreshServer={services.canSyncBackend ? syncBackend : undefined}
+          onRefreshServer={services.canSyncBackend && !demoOffline ? syncBackend : undefined}
         />
       );
     case 'NETWORK':
@@ -184,13 +200,25 @@ function AppContent() {
           showBackendSync={services.canSyncBackend}
           backendBaseUrl={services.backendBaseUrl}
           showBleDiagnostics={services.transportMode === 'NATIVE_BLE' && __DEV__}
+          demoOffline={demoOffline}
+          demoModeBusy={demoModeBusy}
+          onToggleDemoOffline={toggleDemoOffline}
         />
       );
     case 'SETTINGS':
       return <SettingsScreen onBack={() => setRoute('HOME')} />;
     case 'HOME':
     default:
-      return <HomeScreen health={health} onNavigate={setRoute} />;
+      return (
+        <HomeScreen
+          activity={meshActivity}
+          demoOffline={demoOffline}
+          demoModeBusy={demoModeBusy}
+          health={health}
+          onNavigate={setRoute}
+          onToggleDemoOffline={toggleDemoOffline}
+        />
+      );
   }
 }
 

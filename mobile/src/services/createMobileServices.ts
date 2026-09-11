@@ -64,6 +64,8 @@ export interface MobileServices {
   readonly canRunDemoGateway: boolean;
   readonly canSyncBackend: boolean;
   readonly backendBaseUrl: string;
+  isDemoOffline(): boolean;
+  setDemoOffline(enabled: boolean): Promise<void>;
   initialize(): Promise<void>;
   getMeshActivity(): Promise<MobileMeshActivity>;
   subscribeMeshActivity(callback: () => void): () => void;
@@ -74,9 +76,13 @@ export interface MobileServices {
   sendBleTestEnvelope(): Promise<string>;
 }
 
+const DEMO_OFFLINE_KEY = '@resqnet/demo-offline/v1';
+const HOSTED_BACKEND_BASE_URL = 'https://resqnet-backend-2gof.onrender.com';
+
 function configuredBackendBaseUrl(): string {
   const configured = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
   if (configured) return configured.replace(/\/$/, '');
+  if (Platform.OS === 'android' && !__DEV__) return HOSTED_BACKEND_BASE_URL;
   return Platform.OS === 'android' ? 'http://10.0.2.2:4000' : 'http://127.0.0.1:4000';
 }
 
@@ -107,7 +113,7 @@ export function createMobileServices(): MobileServices {
   const mode = configuredMode();
   const backendBaseUrl = configuredBackendBaseUrl();
   const canSyncBackend =
-    mode === 'DEV_EMULATOR_MESH' || Boolean(process.env.EXPO_PUBLIC_API_BASE_URL?.trim());
+    mode === 'DEV_EMULATOR_MESH' || !__DEV__ || Boolean(process.env.EXPO_PUBLIC_API_BASE_URL?.trim());
   const localQueue = new LocalQueueService(asyncStorageAdapter);
   const subscribers = new Set<() => void>();
   let mesh: MeshTransportService | undefined;
@@ -122,13 +128,33 @@ export function createMobileServices(): MobileServices {
   let backendSyncTimer: ReturnType<typeof setInterval> | undefined;
   let backendSyncInFlight: Promise<SyncBatchResponse> | undefined;
   let backendGatewayState: MobileMeshActivity['gatewayState'] = 'NOT_CONNECTED';
+  let demoOffline = false;
 
   const notify = () => {
     for (const subscriber of subscribers) subscriber();
   };
   localQueue.subscribe(notify);
 
-  return {
+  const stopBackendSync = () => {
+    if (backendSyncTimer) clearInterval(backendSyncTimer);
+    backendSyncTimer = undefined;
+  };
+
+  let service!: MobileServices;
+
+  const startBackendSync = () => {
+    if (!initialized || !canSyncBackend || demoOffline || backendSyncTimer) return;
+    backendSyncTimer = setInterval(() => {
+      void service.syncBackend().catch((error: unknown) => {
+        console.info('Backend sync unavailable; local queue retained.', error);
+      });
+    }, 4_000);
+    void service.syncBackend().catch((error: unknown) => {
+      console.info('Initial backend sync unavailable; local queue retained.', error);
+    });
+  };
+
+  service = {
     get mesh(): MeshTransportService {
       if (!mesh) throw new Error('Mobile mesh service has not initialized yet.');
       return mesh;
@@ -143,8 +169,25 @@ export function createMobileServices(): MobileServices {
     canSyncBackend,
     backendBaseUrl,
 
+    isDemoOffline(): boolean {
+      return demoOffline;
+    },
+
+    async setDemoOffline(enabled: boolean): Promise<void> {
+      demoOffline = enabled;
+      await asyncStorageAdapter.setItem(DEMO_OFFLINE_KEY, enabled ? 'true' : 'false');
+      if (enabled) {
+        stopBackendSync();
+        backendGatewayState = 'NOT_CONNECTED';
+      } else {
+        startBackendSync();
+      }
+      notify();
+    },
+
     async initialize(): Promise<void> {
       if (initialized) return;
+      demoOffline = (await asyncStorageAdapter.getItem(DEMO_OFFLINE_KEY)) === 'true';
       nodeId = await getOrCreateDevNodeId(asyncStorageAdapter, randomUUID);
       const persistentQueue = new MessageQueue(
         new KeyValueMessageQueueStorage(asyncStorageAdapter, '@resqnet/mobile-mesh-queue/v1'),
@@ -251,16 +294,7 @@ export function createMobileServices(): MobileServices {
         createId: randomUUID,
       });
       initialized = true;
-      if (canSyncBackend) {
-        backendSyncTimer = setInterval(() => {
-          void this.syncBackend().catch((error: unknown) => {
-            console.info('Backend sync unavailable; local queue retained.', error);
-          });
-        }, 4_000);
-        void this.syncBackend().catch((error: unknown) => {
-          console.info('Initial backend sync unavailable; local queue retained.', error);
-        });
-      }
+      startBackendSync();
       notify();
     },
 
@@ -354,8 +388,7 @@ export function createMobileServices(): MobileServices {
     },
 
     shutdown(): void {
-      if (backendSyncTimer) clearInterval(backendSyncTimer);
-      backendSyncTimer = undefined;
+      stopBackendSync();
       shutdownTransport?.();
     },
 
@@ -372,6 +405,9 @@ export function createMobileServices(): MobileServices {
     async syncBackend(): Promise<SyncBatchResponse> {
       if (!canSyncBackend || !submissions) {
         throw new Error('Real backend sync is not enabled for this transport mode.');
+      }
+      if (demoOffline) {
+        throw new Error('Demo offline mode is on. Reports remain saved and nearby sharing stays active.');
       }
       if (!backendSyncInFlight) {
         backendSyncInFlight = submissions.syncWithGateway(backendBaseUrl)
@@ -417,4 +453,6 @@ export function createMobileServices(): MobileServices {
       return messageId;
     },
   };
+
+  return service;
 }

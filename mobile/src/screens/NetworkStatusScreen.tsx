@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import type { MeshMessageType, NetworkHealthStatus } from '../../../shared/types/index';
+import { DemoOfflineControl } from '../components/DemoOfflineControl';
 import { Disclosure } from '../components/Disclosure';
 import { NetworkStatusPill } from '../components/NetworkStatusPill';
 import { Screen } from '../components/Screen';
@@ -20,6 +21,9 @@ interface NetworkStatusScreenProps {
   showBackendSync: boolean;
   backendBaseUrl: string;
   showBleDiagnostics: boolean;
+  demoOffline: boolean;
+  demoModeBusy: boolean;
+  onToggleDemoOffline: (enabled: boolean) => void;
 }
 
 const MESSAGE_LABELS: Partial<Record<MeshMessageType, string>> = {
@@ -30,6 +34,8 @@ const MESSAGE_LABELS: Partial<Record<MeshMessageType, string>> = {
 };
 
 function displayNodeId(nodeId: string): string {
+  const match = /^(?:NODE|BLE)-([A-F0-9]{8})$/i.exec(nodeId);
+  if (match) return `ResQNet-${match[1]?.toUpperCase()}`;
   return nodeId.length <= 24 ? nodeId : `${nodeId.slice(0, 14)}…${nodeId.slice(-6)}`;
 }
 
@@ -37,7 +43,7 @@ function DeviceRow({ nodeId, state }: { nodeId: string; state: 'Connected' | 'Ne
   const connected = state === 'Connected';
   return (
     <View
-      accessibilityLabel={`${nodeId}. ${state} ResQNet device.`}
+      accessibilityLabel={`${displayNodeId(nodeId)}. ${state} ResQNet device.`}
       accessible
       style={styles.deviceRow}
     >
@@ -60,6 +66,9 @@ export function NetworkStatusScreen({
   showBackendSync,
   backendBaseUrl,
   showBleDiagnostics,
+  demoOffline,
+  demoModeBusy,
+  onToggleDemoOffline,
 }: NetworkStatusScreenProps) {
   const [syncing, setSyncing] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -132,7 +141,9 @@ export function NetworkStatusScreen({
     }
   }
 
-  const gatewayCopy = activity.gatewayState === 'ACKNOWLEDGED'
+  const gatewayCopy = demoOffline
+    ? 'Paused on this phone'
+    : activity.gatewayState === 'ACKNOWLEDGED'
     ? 'Disaster network confirmed'
     : activity.gatewayState === 'FAILED'
       ? 'Disaster network unavailable'
@@ -141,9 +152,28 @@ export function NetworkStatusScreen({
   return (
     <Screen title="Network status" subtitle="Reports save on this phone first, even when every connection is unavailable." onBack={onBack}>
       <NetworkStatusPill health={health} />
+      <DemoOfflineControl
+        busy={demoModeBusy}
+        compact
+        enabled={demoOffline}
+        onChange={onToggleDemoOffline}
+      />
+
+      <View accessible accessibilityLabel={`This phone is ${displayNodeId(activity.nodeId)}`} style={styles.thisDevice}>
+        <Text style={styles.thisDeviceLabel}>This phone</Text>
+        <Text selectable style={styles.thisDeviceName}>{displayNodeId(activity.nodeId)}</Text>
+      </View>
 
       <View style={styles.section}>
-        <Text accessibilityRole="header" style={styles.sectionTitle}>Connected devices</Text>
+        <View style={styles.sectionHeadingRow}>
+          <Text accessibilityRole="header" style={styles.sectionTitle}>Connected devices</Text>
+          <View
+            accessibilityLabel={`${connectedDevices.length} connected ResQNet devices`}
+            style={styles.countBadge}
+          >
+            <Text style={styles.countBadgeText}>{connectedDevices.length}</Text>
+          </View>
+        </View>
         <Text style={styles.sectionDescription}>
           Nearby ResQNet devices can carry reports onward. Their receipt does not mean authorities have received a report.
         </Text>
@@ -190,7 +220,7 @@ export function NetworkStatusScreen({
           <Text style={styles.statLabel}>Central network</Text>
           <Text accessibilityLiveRegion="polite" style={[styles.statValue, styles.gatewayValue]}>{gatewayCopy}</Text>
         </View>
-        {showBackendSync ? (
+        {showBackendSync && !demoOffline ? (
           <TouchableOpacity
             accessibilityRole="button"
             accessibilityState={{ busy: syncing, disabled: syncing }}
@@ -315,9 +345,46 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
     paddingVertical: spacing.xl,
   },
+  thisDevice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    borderBottomColor: colors.border,
+    borderBottomWidth: 1,
+    paddingVertical: spacing.md,
+  },
+  thisDeviceLabel: {
+    color: colors.muted,
+    ...typography.body,
+  },
+  thisDeviceName: {
+    color: colors.textStrong,
+    ...typography.bodyStrong,
+  },
   sectionTitle: {
     color: colors.textStrong,
     ...typography.sectionTitle,
+  },
+  sectionHeadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  countBadge: {
+    minWidth: 34,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primaryTint,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.xs,
+  },
+  countBadgeText: {
+    color: colors.primary,
+    ...typography.label,
+    fontWeight: '800',
   },
   sectionDescription: {
     color: colors.muted,

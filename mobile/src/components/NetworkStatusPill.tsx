@@ -9,12 +9,14 @@ const PRESENTATION: Record<
 > = {
   INTERNET_CONNECTED: {
     label: 'Disaster network available',
-    detail: () => 'Reports can reach the coordination service',
+    detail: (health) => health.nearbyPeerCount > 0
+      ? `Online • ${health.nearbyPeerCount} nearby device${health.nearbyPeerCount === 1 ? '' : 's'} connected`
+      : 'Online • No nearby devices connected',
     color: colors.safe,
   },
   MESH_CONNECTED: {
     label: 'Nearby network available',
-    detail: (health) => `${health.nearbyPeerCount} nearby device${health.nearbyPeerCount === 1 ? '' : 's'}`,
+    detail: (health) => `${health.nearbyPeerCount} ResQNet device${health.nearbyPeerCount === 1 ? '' : 's'} connected nearby`,
     color: colors.warning,
   },
   OFFLINE_QUEUED: {

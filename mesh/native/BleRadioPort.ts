@@ -68,7 +68,7 @@ export interface BleAdvertisingConfig {
   inboundCharacteristicUuid: string;
   outboundCharacteristicUuid: string;
   rotationMs: number;
-  /** Ephemeral transport tag only. Never advertise names, case IDs, or other PII. */
+  /** Stable pseudonymous node tag only. Never advertise names, case IDs, or other PII. */
   ephemeralTag: string;
 }
 
@@ -77,7 +77,7 @@ export interface BleAdvertisingConfig {
  * React Native app. Android implementation requirements:
  * - API 31+: request SCAN, ADVERTISE and CONNECT at runtime.
  * - API <=30: request fine location and require Location Services for scanning.
- * - advertise only service UUID + rotating random tag; never report/person data.
+ * - advertise only service UUID + stable pseudonymous node tag; never report/person data.
  * - host a GATT server (inbound write + outbound notify) while also scanning as central.
  * - close every BluetoothGatt on disconnect/error and stop radio work on shutdown.
  */

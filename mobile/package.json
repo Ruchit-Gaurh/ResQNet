@@ -10,7 +10,7 @@
     "android:native": "./scripts/with-android-java.sh env EXPO_PUBLIC_MESH_TRANSPORT=NATIVE_BLE ./node_modules/.bin/expo run:android",
     "prebuild:android": "expo prebuild --platform android",
     "apk:debug": "./scripts/with-android-java.sh env NODE_ENV=development EXPO_PUBLIC_MESH_TRANSPORT=NATIVE_BLE ./android/gradlew -p android assembleDebug -PreactNativeArchitectures=arm64-v8a",
-    "apk:judge": "./scripts/with-android-java.sh env NODE_ENV=production EXPO_PUBLIC_MESH_TRANSPORT=NATIVE_BLE ./android/gradlew -p android assembleRelease -PreactNativeArchitectures=arm64-v8a -x lintVitalAnalyzeRelease",
+    "apk:judge": "./scripts/with-android-java.sh env NODE_ENV=production EXPO_PUBLIC_MESH_TRANSPORT=NATIVE_BLE EXPO_PUBLIC_API_BASE_URL=https://resqnet-backend-2gof.onrender.com ./android/gradlew -p android assembleRelease -PreactNativeArchitectures=arm64-v8a -x lintVitalAnalyzeRelease",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsc -p tsconfig.test.json && node --test .test-dist/mobile/test/local-first.test.js",
     "build": "expo export --platform android --output-dir dist"

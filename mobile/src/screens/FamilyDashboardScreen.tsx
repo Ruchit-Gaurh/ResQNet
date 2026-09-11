@@ -36,6 +36,11 @@ interface StatusPresentation {
   progressIndex?: number;
 }
 
+interface TimelinePresentation {
+  title: string;
+  message: string;
+}
+
 const STATUS_PRESENTATION: Record<CaseStatus, StatusPresentation> = {
   REGISTERED: {
     label: 'Report saved',
@@ -129,6 +134,50 @@ const CASE_JOURNEY = [
   'Human verification',
   'Verified result',
 ] as const;
+
+function timelinePresentation(event: CaseTimelineEvent): TimelinePresentation {
+  const searchable = `${event.title} ${event.description}`.toLowerCase();
+
+  if (searchable.includes('possible match') || searchable.includes('candidate')) {
+    return {
+      title: 'Possible match found',
+      message: 'Responders are comparing the available information. This is not a confirmed identification.',
+    };
+  }
+
+  if (searchable.includes('reject')) {
+    return {
+      title: 'Possible match dismissed',
+      message: 'A responder determined that this candidate was not the same person. The search can continue.',
+    };
+  }
+
+  if (searchable.includes('confirm') || searchable.includes('verified')) {
+    return {
+      title: 'Identity verified',
+      message: 'An authorized responder confirmed this update.',
+    };
+  }
+
+  if (searchable.includes('under verification') || searchable.includes('human verification')) {
+    return {
+      title: 'Verification started',
+      message: 'An authorized responder is reviewing the information.',
+    };
+  }
+
+  if (searchable.includes('search')) {
+    return {
+      title: 'Search in progress',
+      message: 'Available reports are being checked for useful information.',
+    };
+  }
+
+  return {
+    title: 'Case updated',
+    message: 'New information was added to this case.',
+  };
+}
 
 function caseIdFromRecord(record: LocalQueueRecord): string | undefined {
   const payload = record.envelope.payload;
@@ -293,16 +342,19 @@ function CaseCard({ item, timeline, localRecord, expanded, onToggle }: CaseCardP
             <Text accessibilityRole="header" style={styles.subheading}>Updates</Text>
             {timeline.length === 0 ? (
               <Text style={styles.noUpdates}>No additional updates yet.</Text>
-            ) : timeline.map((event) => (
-              <View key={event.eventId} style={styles.event}>
-                <View accessible={false} style={styles.eventDot} />
-                <View style={styles.eventBody}>
-                  <Text style={styles.eventTitle}>{event.title}</Text>
-                  {event.description ? <Text style={styles.eventDescription}>{event.description}</Text> : null}
-                  <Text style={styles.eventMeta}>{formatDate(event.timestamp) ?? 'Time unavailable'}</Text>
+            ) : timeline.map((event) => {
+              const update = timelinePresentation(event);
+              return (
+                <View key={event.eventId} style={styles.event}>
+                  <View accessible={false} style={styles.eventDot} />
+                  <View style={styles.eventBody}>
+                    <Text style={styles.eventTitle}>{update.title}</Text>
+                    <Text style={styles.eventDescription}>{update.message}</Text>
+                    <Text style={styles.eventMeta}>{formatDate(event.timestamp) ?? 'Time unavailable'}</Text>
+                  </View>
                 </View>
-              </View>
-            ))}
+              );
+            })}
           </View>
 
           {!isConfirmed ? (
