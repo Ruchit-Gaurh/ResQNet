@@ -7,6 +7,7 @@ import { MockMeshNetwork, MockMeshTransport } from '../../mesh/mock/MockMeshTran
 import { InMemoryLocalStorage, LocalQueueService } from '../src/services/LocalQueueService';
 import { getOrCreateDevNodeId } from '../src/services/DevNodeIdentity';
 import { ReportSubmissionService } from '../src/services/ReportSubmissionService';
+import { DeviceBackendAuth } from '../src/services/DeviceBackendAuth';
 
 function idFactory(): () => string {
   let id = 0;
@@ -241,4 +242,36 @@ test('HTTP gateway client sends bearer auth and validates real ACK response', as
   });
   assert.equal(authorization, 'Bearer development-token');
   assert.deepEqual(response.acknowledgedMessageIds, ['message-1']);
+});
+
+test('device backend auth requests and caches a least-privilege device token', async () => {
+  let requestCount = 0;
+  let requestedUrl = '';
+  let requestedBody = '';
+  const auth = new DeviceBackendAuth(
+    'https://backend.test/',
+    'NODE-A1B2C3D4',
+    async (input, init) => {
+      requestCount += 1;
+      requestedUrl = String(input);
+      requestedBody = String(init?.body);
+      return new Response(JSON.stringify({
+        success: true,
+        token: 'public-device-token',
+        expiresInSeconds: 86_400,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    },
+    () => 1_700_000_000_000,
+  );
+
+  const [first, second] = await Promise.all([
+    auth.getAccessToken(),
+    auth.getAccessToken(),
+  ]);
+
+  assert.equal(first, 'public-device-token');
+  assert.equal(second, 'public-device-token');
+  assert.equal(requestCount, 1);
+  assert.equal(requestedUrl, 'https://backend.test/api/v1/auth/device');
+  assert.deepEqual(JSON.parse(requestedBody), { deviceId: 'NODE-A1B2C3D4' });
 });

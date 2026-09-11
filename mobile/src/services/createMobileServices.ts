@@ -28,7 +28,7 @@ import { getOrCreateDevNodeId } from './DevNodeIdentity';
 import { LocalQueueService, type ReceivedMeshRecord } from './LocalQueueService';
 import { ReportSubmissionService } from './ReportSubmissionService';
 import { AndroidBleRadioPort } from './AndroidBleRadioPort';
-import { DevelopmentBackendAuth } from './DevelopmentBackendAuth';
+import { DeviceBackendAuth } from './DeviceBackendAuth';
 
 export type MobileMeshMode = 'MOCK_IN_PROCESS' | 'DEV_EMULATOR_MESH' | 'NATIVE_BLE';
 
@@ -195,15 +195,9 @@ export function createMobileServices(): MobileServices {
       const persistentDedup = new Deduplicator(
         new KeyValueSeenMessageStore(asyncStorageAdapter, '@resqnet/mobile-mesh-seen/v1'),
       );
-      const developmentAuth = new DevelopmentBackendAuth(
-        backendBaseUrl,
-        `mobile-${nodeId}`,
-      );
+      const deviceAuth = new DeviceBackendAuth(backendBaseUrl, nodeId);
       const gatewayClient = new FetchGatewayClient({
-        getAccessToken:
-          mode === 'DEV_EMULATOR_MESH' || __DEV__
-            ? () => developmentAuth.getAccessToken()
-            : undefined,
+        getAccessToken: canSyncBackend ? () => deviceAuth.getAccessToken() : undefined,
       });
 
       if (mode === 'NATIVE_BLE') {
