@@ -17,6 +17,12 @@ import { matchPhysical } from './physical-matcher';
 import { matchPhotos } from './photo-matcher';
 import { calculateScore } from './scorer';
 import { addSafetyWarnings } from './explainability';
+import { config } from '../../config';
+import {
+  assessSimilarityWithOpenAi,
+  type PersonEvidence,
+} from './openai-similarity';
+import { determineConfidenceLevel } from './scorer';
 
 import type { Case, Sighting } from '@prisma/client';
 
@@ -72,6 +78,26 @@ function extractLocation(locationData: unknown): GeoLocation | null {
   };
 }
 
+function openAiEvidence(
+  person: PersonData,
+  location: GeoLocation | null,
+  observedAt?: string,
+): PersonEvidence {
+  return {
+    name: person.name,
+    nickname: person.nickname,
+    age: person.age,
+    approximateAge: person.approximateAge,
+    gender: person.gender,
+    clothing: person.clothing,
+    identifyingMarks: person.identifyingMarks,
+    height: person.height,
+    photoAvailable: Boolean(person.photoUrl),
+    locationZone: location?.zone,
+    observedAt,
+  };
+}
+
 export const matchingService = {
   /**
    * Evaluate a match between a missing case and a found/candidate case.
@@ -97,8 +123,46 @@ export const matchingService = {
     // Calculate weighted score
     const scored = calculateScore(nameResult, ageResult, locationResult, timelineResult, physicalResult, photoResult);
 
-    // Add safety warnings
-    return addSafetyWarnings(scored);
+    const deterministic = addSafetyWarnings(scored);
+    try {
+      const aiAssessment = await assessSimilarityWithOpenAi(
+        openAiEvidence(target, targetLocation, missingCase.lastKnownTime?.toISOString()),
+        openAiEvidence(candidate, candidateLocation, candidateCase.createdAt.toISOString()),
+        deterministic,
+        {
+          apiKey: config.matching.openAiApiKey,
+          model: config.matching.openAiModel,
+        },
+      );
+      if (!aiAssessment) return deterministic;
+
+      return {
+        ...deterministic,
+        overallScore: aiAssessment.similarityPercentage,
+        confidenceLevel: determineConfidenceLevel(aiAssessment.similarityPercentage),
+        breakdown: {
+          ...deterministic.breakdown,
+          openAiSimilarityScore: aiAssessment.similarityPercentage,
+        },
+        reasons: [
+          ...deterministic.reasons,
+          `OpenAI report similarity assessment: ${aiAssessment.similarityPercentage}%`,
+          ...aiAssessment.matchingEvidence.map((reason) => `AI evidence: ${reason}`),
+        ],
+        warnings: [
+          ...deterministic.warnings,
+          ...aiAssessment.conflictingEvidence.map((reason) => `⚠ AI noted conflict: ${reason}`),
+          ...aiAssessment.missingEvidence.map((reason) => `⚠ Missing evidence: ${reason}`),
+          '⚠ The OpenAI percentage is a prototype report-similarity score, not a scientific identity probability.',
+        ],
+      };
+    } catch (error) {
+      console.warn(
+        '[MATCHING] OpenAI assessment unavailable; deterministic scoring retained:',
+        error instanceof Error ? error.message : 'unknown error',
+      );
+      return deterministic;
+    }
   },
 
   /**

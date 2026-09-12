@@ -43,7 +43,7 @@ const WEIGHTS = {
  * Determine confidence level from overall score.
  * HUMAN_VERIFIED is NEVER assigned by the scorer — only by human review.
  */
-function determineConfidenceLevel(score: number): MatchConfidence {
+export function determineConfidenceLevel(score: number): MatchConfidence {
   if (score >= 80) return 'STRONG_CANDIDATE';
   if (score >= 60) return 'POSSIBLE_MATCH';
   if (score >= 40) return 'WEAK_CANDIDATE';

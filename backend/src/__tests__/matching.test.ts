@@ -7,8 +7,74 @@ import { matchPhysical } from '../modules/matching/physical-matcher';
 import { matchPhotos } from '../modules/matching/photo-matcher';
 import { calculateScore } from '../modules/matching/scorer';
 import { addSafetyWarnings } from '../modules/matching/explainability';
+import { assessSimilarityWithOpenAi } from '../modules/matching/openai-similarity';
 
 describe('Matching Module', () => {
+  describe('OpenAI report similarity', () => {
+    const deterministic = calculateScore(
+      { score: 90, reasons: ['Name evidence'], warnings: [] },
+      { score: 90, reasons: ['Age evidence'], warnings: [] },
+      { score: 50, reasons: [], warnings: [] },
+      { score: 80, reasons: [], warnings: [] },
+      { score: 70, reasons: [], warnings: [] },
+      { score: 50, reasons: [], warnings: ['Photo not compared'] },
+    );
+
+    it('does not call OpenAI when the key is absent or a placeholder', async () => {
+      let calls = 0;
+      const result = await assessSimilarityWithOpenAi(
+        { name: 'Rahul Sharma', photoAvailable: false },
+        { name: 'Rahool Sharma', photoAvailable: false },
+        deterministic,
+        {
+          apiKey: 'replace-me-with-a-server-side-openai-key',
+          model: 'test-model',
+          fetchImpl: (async () => {
+            calls += 1;
+            throw new Error('must not be called');
+          }) as typeof fetch,
+        },
+      );
+      expect(result).toBeUndefined();
+      expect(calls).toBe(0);
+    });
+
+    it('requests strict structured evidence and returns the numeric similarity', async () => {
+      let requestBody: Record<string, any> | undefined;
+      const fakeFetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(JSON.stringify({
+          output: [{
+            type: 'message',
+            content: [{
+              type: 'output_text',
+              text: JSON.stringify({
+                similarityPercentage: 87,
+                matchingEvidence: ['Names and approximate ages align'],
+                conflictingEvidence: [],
+                missingEvidence: ['No comparable photograph'],
+              }),
+            }],
+          }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      };
+
+      const result = await assessSimilarityWithOpenAi(
+        { name: 'Rahul Sharma', approximateAge: 22, photoAvailable: false },
+        { name: 'Rahool Sharma', approximateAge: 23, photoAvailable: false },
+        deterministic,
+        { apiKey: 'test-secret-key', model: 'test-model', fetchImpl: fakeFetch as typeof fetch },
+      );
+
+      expect(result?.similarityPercentage).toBe(87);
+      expect(requestBody?.store).toBe(false);
+      expect(requestBody?.text.format.type).toBe('json_schema');
+      expect(requestBody?.text.format.strict).toBe(true);
+      expect(String(requestBody?.instructions)).toContain('Do not invent');
+      expect(String(requestBody?.input)).not.toContain('photoUrl');
+    });
+  });
+
   describe('Name Matcher', () => {
     it('gives higher score for similar names (fuzzy and phonetic)', () => {
       // E.g. Rahul Sharma vs Rahool Sharma

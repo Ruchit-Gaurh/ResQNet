@@ -23,5 +23,7 @@ export const config = {
     thresholdStrong: parseInt(process.env.MATCH_THRESHOLD_STRONG || '80', 10),
     thresholdPossible: parseInt(process.env.MATCH_THRESHOLD_POSSIBLE || '60', 10),
     thresholdWeak: parseInt(process.env.MATCH_THRESHOLD_WEAK || '40', 10),
+    openAiApiKey: process.env.OPENAI_API_KEY,
+    openAiModel: process.env.OPENAI_MATCH_MODEL || 'gpt-5-mini',
   },
 } as const;
