@@ -57,6 +57,13 @@ export interface NativeBleActivity {
   receivedCount: number;
   relayedCount: number;
   peerReceiptCount: number;
+  peerSignals: Array<{
+    /** Stable ResQNet node identity learned from a directly received envelope. */
+    nodeId: string;
+    radioPeerId: string;
+    rssi: number;
+    lastSeenAt: number;
+  }>;
   lastActivity?: string;
   lastReceived?: {
     messageId: string;
@@ -87,6 +94,8 @@ export class NativeBleMeshTransport implements MeshTransportService {
   private readonly assembler: BleFrameAssembler;
   private readonly peers = new Map<string, MeshPeer>();
   private readonly connectedFrameBytes = new Map<string, number>();
+  private readonly radioPeerSignals = new Map<string, { rssi: number; lastSeenAt: number }>();
+  private readonly logicalNodeByRadioPeer = new Map<string, string>();
   private readonly listeners = new Set<(envelope: MeshEnvelope<unknown>) => void>();
   private readonly receiptListeners = new Set<(messageId: string) => void>();
   private readonly activityListeners = new Set<(activity: NativeBleActivity) => void>();
@@ -125,6 +134,14 @@ export class NativeBleMeshTransport implements MeshTransportService {
     this.unsubscribers.push(
       this.radio.onPeerFound((event) => {
         this.peers.set(event.peerId, { nodeId: event.peerId, lastSeenAt: event.lastSeenAt });
+        if (typeof event.rssi === 'number' && Number.isFinite(event.rssi)) {
+          const previous = this.radioPeerSignals.get(event.peerId);
+          this.radioPeerSignals.set(event.peerId, {
+            // Smooth normal BLE scan noise while retaining useful approach trend.
+            rssi: previous ? previous.rssi * 0.7 + event.rssi * 0.3 : event.rssi,
+            lastSeenAt: event.lastSeenAt,
+          });
+        }
         this.lastActivity = `Nearby ResQNet peer ${event.peerId} discovered.`;
         this.emitActivity();
         void this.radio.connect(event.peerId).catch((error: unknown) => this.recordError(error));
@@ -206,6 +223,13 @@ export class NativeBleMeshTransport implements MeshTransportService {
     return this.queue.getAll();
   }
 
+  async removeQueuedMessage(messageId: string): Promise<void> {
+    this.ensureInitialized();
+    await this.queue.acknowledge(messageId);
+    this.queuedMessageCount = await this.queue.size();
+    this.emitActivity();
+  }
+
   getNetworkHealth(): NetworkHealthStatus {
     this.ensureInitialized();
     const connectivity = this.internetAcknowledged
@@ -250,6 +274,13 @@ export class NativeBleMeshTransport implements MeshTransportService {
       receivedCount: this.receivedCount,
       relayedCount: this.relayedCount,
       peerReceiptCount: this.peerReceiptCount,
+      peerSignals: [...this.radioPeerSignals.entries()].map(([radioPeerId, signal]) => ({
+        // Current Android advertisements encode NODE-XXXXXXXX directly. The
+        // learned mapping also supports a future rotating radio identifier.
+        nodeId: this.logicalNodeByRadioPeer.get(radioPeerId) ?? radioPeerId,
+        radioPeerId,
+        ...signal,
+      })),
       lastActivity: this.lastTransportError ?? this.lastActivity,
       lastReceived: this.lastReceived,
     };
@@ -287,6 +318,8 @@ export class NativeBleMeshTransport implements MeshTransportService {
     for (const unsubscribe of this.unsubscribers.splice(0)) unsubscribe();
     this.peers.clear();
     this.connectedFrameBytes.clear();
+    this.radioPeerSignals.clear();
+    this.logicalNodeByRadioPeer.clear();
     this.assembler.clear();
     await this.radio.stop();
     this.radioReady = false;
@@ -437,6 +470,15 @@ export class NativeBleMeshTransport implements MeshTransportService {
 
   private async acceptEnvelope(peerId: string, envelope: MeshEnvelope<unknown>): Promise<void> {
     if (isEnvelopeExpired(envelope, this.now()) || envelope.hopCount > envelope.maxHops) return;
+    // Android advertisements carry a compact radio identifier. A directly
+    // received envelope lets us associate it with the sender's stable logical
+    // node ID, which is required to identify the correct rescue target signal.
+    const logicalNodeId = envelope.senderPseudonym.startsWith('MOBILE-')
+      ? envelope.senderPseudonym.slice('MOBILE-'.length)
+      : undefined;
+    if (logicalNodeId && /^NODE-[A-F0-9]{8}$/.test(logicalNodeId)) {
+      this.logicalNodeByRadioPeer.set(peerId, logicalNodeId);
+    }
     const isNew = await this.deduplicator.checkAndMark(envelope.messageId);
     await this.sendPacket(peerId, { kind: 'RECEIPT', messageId: envelope.messageId });
     if (!isNew) return;

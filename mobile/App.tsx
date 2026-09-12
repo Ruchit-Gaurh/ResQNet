@@ -196,6 +196,7 @@ function AppContent() {
           loadHelpStatus={(requestId) => services.getHelpStatus(requestId)}
           onBack={() => setRoute('HOME')}
           onSaved={onHelpSaved}
+          onLocationUpdated={onHelpSaved}
         />
       );
     case 'RESCUER':
@@ -203,6 +204,7 @@ function AppContent() {
         <RescuerModeScreen
           backendBaseUrl={services.backendBaseUrl}
           localQueue={services.localQueue}
+          getBluetoothProximity={services.getRescueBluetoothProximity}
           onSendRescueSignal={(target, action, rescuerLocation) => services.sendRescueSignal(target, action, rescuerLocation)}
           onBack={() => setRoute('HOME')}
         />

@@ -168,6 +168,12 @@ export class DevMeshTransport implements MeshTransportService {
     return queued;
   }
 
+  async removeQueuedMessage(messageId: string): Promise<void> {
+    this.ensureInitialized();
+    await this.queue.acknowledge(messageId);
+    await this.refreshQueueCount();
+  }
+
   getNetworkHealth(): NetworkHealthStatus {
     this.ensureInitialized();
     const connectivity = this.lastSuccessfulSyncTimestamp

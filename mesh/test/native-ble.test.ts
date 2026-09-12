@@ -117,8 +117,8 @@ class LinkedRadio implements BleRadioPort {
     this.frameListeners.add(callback);
     return () => this.frameListeners.delete(callback);
   }
-  emitPeer(peerId: string): void {
-    for (const listener of this.peerListeners) listener({ peerId, lastSeenAt: Date.now() });
+  emitPeer(peerId: string, rssi = -61): void {
+    for (const listener of this.peerListeners) listener({ peerId, lastSeenAt: Date.now(), rssi });
   }
   attach(peerId: string): void {
     if (!this.connected.add(peerId)) return;
@@ -197,6 +197,8 @@ test('native-independent BLE path relays A -> B -> C with receipt and persistent
   nodeA.onPeerReceipt(() => { receiptsAtA += 1; });
   network.discover('A', 'B');
   await waitFor(() => nodeA.getActivity().connectedPeerIds.includes('B'));
+  assert.equal(nodeA.getActivity().peerSignals[0]?.nodeId, 'B');
+  assert.equal(Math.round(nodeA.getActivity().peerSignals[0]?.rssi ?? 0), -61);
 
   const source = report();
   await nodeA.sendMeshMessage(source);

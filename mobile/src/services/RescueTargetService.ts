@@ -115,7 +115,24 @@ export class RescueTargetService {
   async markFound(caseId: string): Promise<void> {
     const resolvedIds = await this.getResolvedIds();
     resolvedIds.add(caseId);
-    await this.storage.setItem(RESOLVED_TARGETS_KEY, JSON.stringify([...resolvedIds]));
+    const cached = await this.storage.getItem(RESCUE_TARGET_CACHE_KEY);
+    let remainingTargets: DisasterCase[] = [];
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached) as unknown;
+        remainingTargets = Array.isArray(parsed)
+          ? parsed.filter((item): item is DisasterCase => this.isDisasterCase(item) && item.caseId !== caseId)
+          : [];
+      } catch {
+        remainingTargets = [];
+      }
+    }
+    // Do not leave an exact completed target location in the responder's
+    // offline cache after visual contact has been confirmed.
+    await Promise.all([
+      this.storage.setItem(RESOLVED_TARGETS_KEY, JSON.stringify([...resolvedIds])),
+      this.storage.setItem(RESCUE_TARGET_CACHE_KEY, JSON.stringify(remainingTargets)),
+    ]);
   }
 
   private async getLocalTargets(): Promise<DisasterCase[]> {

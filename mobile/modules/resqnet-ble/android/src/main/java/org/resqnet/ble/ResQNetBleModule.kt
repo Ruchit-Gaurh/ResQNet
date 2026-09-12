@@ -52,7 +52,9 @@ private const val MANUFACTURER_ID = 0x5251
 private const val ADVERTISEMENT_TAG_BYTES = 4
 private const val DEFAULT_FRAME_BYTES = 20
 private const val REQUESTED_MTU = 247
-private const val PEER_EVENT_THROTTLE_MS = 5_000L
+// Close-range rescue guidance needs a responsive RSSI trend, while a modest
+// throttle avoids flooding the React Native bridge with every scan callback.
+private const val PEER_EVENT_THROTTLE_MS = 1_500L
 private val CLIENT_CONFIGURATION_UUID: UUID =
   UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
@@ -383,7 +385,14 @@ class ResQNetBleModule : Module() {
     val last = lastPeerEventAt[peerId] ?: 0L
     if (now - last >= PEER_EVENT_THROTTLE_MS) {
       lastPeerEventAt[peerId] = now
-      emit("onPeerFound", mapOf("peerId" to peerId, "lastSeenAt" to now.toDouble()))
+      emit(
+        "onPeerFound",
+        mapOf(
+          "peerId" to peerId,
+          "lastSeenAt" to now.toDouble(),
+          "rssi" to result.rssi.toDouble(),
+        ),
+      )
     }
   }
 

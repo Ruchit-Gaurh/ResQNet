@@ -63,6 +63,28 @@ function isDisasterCase(value: unknown): value is DisasterCase {
   );
 }
 
+function redactRescueCoordinates(
+  envelope: MeshEnvelope<unknown>,
+  requestId: string,
+): MeshEnvelope<unknown> {
+  if (envelope.messageType !== 'EMERGENCY' || !isRecord(envelope.payload)) return envelope;
+  const isRequest = envelope.payload.requestId === requestId
+    && (envelope.payload.status === 'REQUESTING_HELP' || envelope.payload.status === 'PERSON_FOUND');
+  const isSignal = envelope.payload.kind === 'RESCUE_SIGNAL'
+    && envelope.payload.targetRequestId === requestId;
+  if (!isRequest && !isSignal) return envelope;
+  const payload = { ...envelope.payload };
+  delete payload.location;
+  delete payload.locationObservedAt;
+  delete payload.rescuerLocation;
+  delete payload.rescuerLocationObservedAt;
+  if (isRequest) {
+    payload.status = 'PERSON_FOUND';
+    payload.locationRedacted = true;
+  }
+  return { ...envelope, payload };
+}
+
 export class LocalQueueService {
   private mutation: Promise<void> = Promise.resolve();
   private readonly listeners = new Set<() => void>();
@@ -234,6 +256,21 @@ export class LocalQueueService {
   async getReceivedRecords(): Promise<ReceivedMeshRecord[]> {
     const records = await this.readArray<ReceivedMeshRecord>(RECEIVED_KEY);
     return records.sort((left, right) => right.receivedAt - left.receivedAt);
+  }
+
+  async redactRescueLocation(requestId: string): Promise<void> {
+    await this.withMutation(async () => {
+      const records = await this.readArray<LocalQueueRecord>(RECORDS_KEY);
+      const received = await this.readArray<ReceivedMeshRecord>(RECEIVED_KEY);
+      await this.writeArray(RECORDS_KEY, records.map((record) => {
+        const envelope = redactRescueCoordinates(record.envelope, requestId);
+        return envelope === record.envelope ? record : { ...record, envelope, updatedAt: this.now() };
+      }));
+      await this.writeArray(RECEIVED_KEY, received.map((record) => ({
+        ...record,
+        envelope: redactRescueCoordinates(record.envelope, requestId),
+      })));
+    });
   }
 
   subscribe(callback: () => void): () => void {

@@ -74,6 +74,10 @@ export interface EmergencyHelpInput {
   locationSource?: EmergencyHelpRequest['locationSource'];
 }
 
+export interface EmergencyHelpLocationUpdateInput extends EmergencyHelpInput {
+  requestId: string;
+}
+
 export interface SubmissionResult {
   messageId: string;
   referenceId?: string;
@@ -216,6 +220,23 @@ export class ReportSubmissionService {
     };
     const result = await this.submitEnvelope('EMERGENCY', 'CRITICAL', payload, DEFAULT_REPORT_TTL_MS);
     return { ...result, referenceId: payload.requestId };
+  }
+
+  async updateEmergencyHelpLocation(input: EmergencyHelpLocationUpdateInput): Promise<SubmissionResult> {
+    const payload: EmergencyHelpRequest & { updateType: 'LOCATION_UPDATE' } = {
+      requestId: input.requestId,
+      requesterName: clean(input.requesterName),
+      note: clean(input.note),
+      location: input.location,
+      locationObservedAt: input.locationObservedAt,
+      locationSource: input.locationSource ?? 'CURRENT',
+      timestamp: new Date(this.now()).toISOString(),
+      consentToShareLocation: true,
+      status: 'REQUESTING_HELP',
+      updateType: 'LOCATION_UPDATE',
+    };
+    const result = await this.submitEnvelope('EMERGENCY', 'CRITICAL', payload, 10 * 60_000);
+    return { ...result, referenceId: input.requestId };
   }
 
   async syncWithGateway(

@@ -89,4 +89,37 @@ describe('Remote rescue coordination', () => {
     expect(body.status.status).toBe('RESCUER_ASSIGNED');
     expect(body.status.rescuerNodeId).toBe('NODE-RESCUE1');
   });
+
+  it('does not return a completed target location after privacy redaction', async () => {
+    (prisma.syncMessage.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        messageId: 'help-envelope',
+        messageType: 'EMERGENCY',
+        senderPseudonym: 'MOBILE-NODE-A1B2C3D4',
+        processedAt: new Date('2026-09-12T10:02:00.000Z'),
+        payload: {
+          requestId: 'HELP-1',
+          requesterName: 'Aman',
+          timestamp: '2026-09-12T10:00:00.000Z',
+          status: 'PERSON_FOUND',
+          locationRedacted: true,
+          locationRedactedAt: '2026-09-12T10:02:00.000Z',
+        },
+      },
+    ]);
+
+    const targetResponse = await fetch(`${baseUrl}/api/v1/rescue/targets`, {
+      headers: { Authorization: `Bearer ${volunteerToken}` },
+    });
+    const targetBody = await targetResponse.json() as { targets: unknown[] };
+    expect(targetBody.targets).toEqual([]);
+
+    const statusResponse = await fetch(`${baseUrl}/api/v1/rescue/help/HELP-1/status`, {
+      headers: { Authorization: `Bearer ${requesterToken}` },
+    });
+    const statusBody = await statusResponse.json() as { status: Record<string, unknown> };
+    expect(statusBody.status.status).toBe('PERSON_FOUND');
+    expect(statusBody.status.location).toBeUndefined();
+    expect(statusBody.status.rescuerLocation).toBeUndefined();
+  });
 });

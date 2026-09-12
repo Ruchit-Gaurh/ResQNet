@@ -3,7 +3,7 @@ import { generateCaseId, generateSightingId, generateCheckInId } from '../../uti
 import { auditService, AuditActions } from '../audit/audit.service';
 import { matchingService } from '../matching/matching.service';
 import { deviceTelemetrySchema, type SyncBatchInput } from './sync.validation';
-import type { MeshMessageType, PriorityLevel, ReportSource } from '@prisma/client';
+import { Prisma, type MeshMessageType, type PriorityLevel, type ReportSource } from '@prisma/client';
 
 type CreatedCaseForMatching = { id: string; type: 'MISSING' | 'FOUND' | 'UNIDENTIFIED_PATIENT' };
 type DeviceTelemetry = NonNullable<SyncBatchInput['deviceTelemetry']>;
@@ -12,11 +12,147 @@ function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+async function redactRescueLocationsAfterFound(
+  tx: Prisma.TransactionClient,
+  completionPayload: Record<string, unknown>,
+): Promise<void> {
+  if (
+    completionPayload.kind !== 'RESCUE_SIGNAL'
+    || completionPayload.action !== 'PERSON_FOUND'
+    || typeof completionPayload.targetRequestId !== 'string'
+    || typeof completionPayload.targetSenderPseudonym !== 'string'
+  ) return;
+
+  const requestId = completionPayload.targetRequestId;
+  const targetSenderPseudonym = completionPayload.targetSenderPseudonym;
+  const redactedAt = new Date().toISOString();
+  const messages = await tx.syncMessage.findMany({
+    where: { messageType: 'EMERGENCY' },
+    select: { messageId: true, senderPseudonym: true, payload: true },
+  });
+
+  for (const message of messages) {
+    const payload = objectValue(message.payload);
+    if (!payload) continue;
+    const isOriginalRequest = message.senderPseudonym === targetSenderPseudonym
+      && payload.requestId === requestId
+      && (payload.status === 'REQUESTING_HELP' || payload.status === 'PERSON_FOUND');
+    const isRelatedSignal = payload.kind === 'RESCUE_SIGNAL'
+      && payload.targetRequestId === requestId
+      && payload.targetSenderPseudonym === targetSenderPseudonym;
+    if (!isOriginalRequest && !isRelatedSignal) continue;
+
+    const sanitized = { ...payload };
+    delete sanitized.location;
+    delete sanitized.locationObservedAt;
+    delete sanitized.rescuerLocation;
+    delete sanitized.rescuerLocationObservedAt;
+    if (isOriginalRequest) {
+      sanitized.status = 'PERSON_FOUND';
+      sanitized.locationRedacted = true;
+      sanitized.locationRedactedAt = redactedAt;
+    }
+    await tx.syncMessage.update({
+      where: { messageId: message.messageId },
+      data: { payload: sanitized as Prisma.InputJsonValue },
+    });
+  }
+
+  const targetNodeId = targetSenderPseudonym.startsWith('MOBILE-')
+    ? targetSenderPseudonym.slice('MOBILE-'.length)
+    : targetSenderPseudonym;
+  await tx.devicePresence.updateMany({
+    where: { nodeId: targetNodeId },
+    data: {
+      latitude: null,
+      longitude: null,
+      accuracyMeters: null,
+      zone: null,
+      locationObservedAt: null,
+    },
+  });
+}
+
+async function redactLateLocationForResolvedRequest(
+  tx: Prisma.TransactionClient,
+  senderPseudonym: string,
+  messageId: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  if (
+    payload.status !== 'REQUESTING_HELP'
+    || typeof payload.requestId !== 'string'
+    || !payload.location
+  ) return;
+  const signals = await tx.syncMessage.findMany({
+    where: { messageType: 'EMERGENCY' },
+    select: { payload: true },
+  });
+  const alreadyResolved = signals.some((message) => {
+    const signal = objectValue(message.payload);
+    return signal?.kind === 'RESCUE_SIGNAL'
+      && signal.action === 'PERSON_FOUND'
+      && signal.targetRequestId === payload.requestId
+      && signal.targetSenderPseudonym === senderPseudonym;
+  });
+  if (!alreadyResolved) return;
+
+  const sanitized = { ...payload };
+  delete sanitized.location;
+  delete sanitized.locationObservedAt;
+  sanitized.status = 'PERSON_FOUND';
+  sanitized.locationRedacted = true;
+  sanitized.locationRedactedAt = new Date().toISOString();
+  await tx.syncMessage.update({
+    where: { messageId },
+    data: { payload: sanitized as Prisma.InputJsonValue },
+  });
+}
+
+async function shouldSuppressResolvedRequesterLocation(nodeId: string): Promise<boolean> {
+  const senderPseudonym = `MOBILE-${nodeId}`;
+  const messages = await prisma.syncMessage.findMany({
+    where: { messageType: 'EMERGENCY' },
+    orderBy: { processedAt: 'asc' },
+    take: 5_000,
+    select: { senderPseudonym: true, payload: true },
+  });
+  const resolvedRequestIds = new Set<string>();
+  let latestRequestResolved = false;
+  for (const message of messages) {
+    const payload = objectValue(message.payload);
+    if (!payload) continue;
+    if (
+      message.senderPseudonym === senderPseudonym
+      && payload.status === 'REQUESTING_HELP'
+      && typeof payload.requestId === 'string'
+    ) {
+      latestRequestResolved = resolvedRequestIds.has(payload.requestId);
+    }
+    if (
+      payload.kind === 'RESCUE_SIGNAL'
+      && payload.action === 'PERSON_FOUND'
+      && payload.targetSenderPseudonym === senderPseudonym
+    ) {
+      if (typeof payload.targetRequestId === 'string') resolvedRequestIds.add(payload.targetRequestId);
+      latestRequestResolved = true;
+    }
+  }
+  return latestRequestResolved;
+}
+
 async function recordDevicePresence(
   telemetry: DeviceTelemetry,
   connectivitySource: 'DIRECT' | 'RELAYED',
   relayedByNodeId?: string,
 ): Promise<void> {
+  const suppressLocation = await shouldSuppressResolvedRequesterLocation(telemetry.nodeId);
   const existing = await prisma.devicePresence.findUnique({ where: { nodeId: telemetry.nodeId } });
   const observedAt = new Date(telemetry.observedAt);
   const now = new Date();
@@ -25,7 +161,7 @@ async function recordDevicePresence(
   // observation. Its gateway receipt is still recorded by SyncMessage.
   if (existing && existing.presenceObservedAt > observedAt) return;
 
-  const location = telemetry.location;
+  const location = suppressLocation ? undefined : telemetry.location;
   await prisma.devicePresence.upsert({
     where: { nodeId: telemetry.nodeId },
     create: {
@@ -37,9 +173,11 @@ async function recordDevicePresence(
       longitude: location?.lng,
       accuracyMeters: location?.accuracyMeters,
       zone: location?.zone,
-      locationObservedAt: telemetry.locationObservedAt
-        ? new Date(telemetry.locationObservedAt)
-        : location ? observedAt : undefined,
+      locationObservedAt: suppressLocation
+        ? undefined
+        : telemetry.locationObservedAt
+          ? new Date(telemetry.locationObservedAt)
+          : location ? observedAt : undefined,
       presenceObservedAt: observedAt,
       lastGatewayContactAt: now,
       relayedByNodeId: connectivitySource === 'RELAYED' ? relayedByNodeId : undefined,
@@ -50,11 +188,13 @@ async function recordDevicePresence(
       displayName: telemetry.displayName,
       transportMode: telemetry.transportMode,
       connectivitySource,
-      latitude: location?.lat,
-      longitude: location?.lng,
-      accuracyMeters: location?.accuracyMeters,
-      zone: location?.zone,
-      locationObservedAt: telemetry.locationObservedAt
+      latitude: suppressLocation ? null : location?.lat,
+      longitude: suppressLocation ? null : location?.lng,
+      accuracyMeters: suppressLocation ? null : location?.accuracyMeters,
+      zone: suppressLocation ? null : location?.zone,
+      locationObservedAt: suppressLocation
+        ? null
+        : telemetry.locationObservedAt
         ? new Date(telemetry.locationObservedAt)
         : location ? observedAt : existing?.locationObservedAt ?? undefined,
       presenceObservedAt: observedAt,
@@ -228,6 +368,17 @@ export const syncService = {
                   senderPseudonym: envelope.senderPseudonym,
                 },
               });
+              return undefined;
+            }
+
+            case 'EMERGENCY': {
+              await redactRescueLocationsAfterFound(tx, payload);
+              await redactLateLocationForResolvedRequest(
+                tx,
+                envelope.senderPseudonym,
+                envelope.messageId,
+                payload,
+              );
               return undefined;
             }
 

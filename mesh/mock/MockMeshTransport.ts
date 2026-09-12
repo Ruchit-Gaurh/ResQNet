@@ -199,6 +199,12 @@ export class MockMeshTransport implements MeshTransportService {
     return queued;
   }
 
+  async removeQueuedMessage(messageId: string): Promise<void> {
+    this.ensureInitialized();
+    await this.queue.acknowledge(messageId);
+    this.queuedMessageCount = await this.queue.size();
+  }
+
   /** Replays durable outbox items after restart or when peers become available. */
   async relayQueuedMessages(): Promise<number> {
     this.ensureInitialized();

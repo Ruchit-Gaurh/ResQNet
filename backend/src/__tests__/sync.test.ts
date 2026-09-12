@@ -5,10 +5,25 @@ import prisma from '../config/database';
 import { generateTestToken } from './test-helpers';
 
 vi.mock('../config/database', () => {
+  const transactionClient = {
+    syncMessage: {
+      create: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
+      update: vi.fn(),
+    },
+    devicePresence: { updateMany: vi.fn() },
+    case: {
+      create: vi.fn().mockResolvedValue({ id: 'case-internal-1', type: 'MISSING' }),
+    },
+    sighting: { create: vi.fn() },
+    safeCheckIn: { create: vi.fn() },
+  };
   return {
     default: {
+      __transactionClient: transactionClient,
       syncMessage: {
         findUnique: vi.fn(),
+        findMany: vi.fn().mockResolvedValue([]),
         create: vi.fn(),
       },
       devicePresence: {
@@ -34,17 +49,7 @@ vi.mock('../config/database', () => {
         create: vi.fn().mockResolvedValue({ id: 'audit-1' }),
         findMany: vi.fn().mockResolvedValue([]),
       },
-      $transaction: vi.fn(async (cb) => {
-        const tx = {
-          syncMessage: { create: vi.fn() },
-          case: {
-            create: vi.fn().mockResolvedValue({ id: 'case-internal-1', type: 'MISSING' }),
-          },
-          sighting: { create: vi.fn() },
-          safeCheckIn: { create: vi.fn() },
-        };
-        return cb(tx);
-      }),
+      $transaction: vi.fn(async (cb) => cb(transactionClient)),
     },
   };
 });
@@ -73,6 +78,8 @@ describe('Sync Module API (Idempotent Mesh Gateway)', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    (prisma.syncMessage.findMany as any).mockResolvedValue([]);
+    (prisma as any).__transactionClient.syncMessage.findMany.mockResolvedValue([]);
   });
 
   const sampleEnvelope = {
@@ -306,5 +313,128 @@ describe('Sync Module API (Idempotent Mesh Gateway)', () => {
         relayedByNodeId: 'DEVICE-NODE-1',
       }),
     }));
+  });
+
+  it('redacts persisted rescue coordinates when a person-found signal is acknowledged', async () => {
+    (prisma.syncMessage.findUnique as any).mockResolvedValue(null);
+    const tx = (prisma as any).__transactionClient;
+    tx.syncMessage.findMany.mockResolvedValue([
+      {
+        messageId: 'help-request-1',
+        senderPseudonym: 'MOBILE-DEVICE-NODE-1',
+        payload: {
+          requestId: 'HELP-1',
+          status: 'REQUESTING_HELP',
+          timestamp: '2026-09-12T10:00:00.000Z',
+          location: { lat: 26.9124, lng: 75.7873, accuracyMeters: 8 },
+          locationObservedAt: 1_700_000_000_000,
+        },
+      },
+      {
+        messageId: 'person-found-1',
+        senderPseudonym: 'MOBILE-NODE-RESCUE1',
+        payload: {
+          kind: 'RESCUE_SIGNAL',
+          action: 'PERSON_FOUND',
+          targetRequestId: 'HELP-1',
+          targetSenderPseudonym: 'MOBILE-DEVICE-NODE-1',
+          rescuerLocation: { lat: 26.913, lng: 75.788 },
+        },
+      },
+    ]);
+    const now = Date.now();
+    const response = await fetch(`${baseUrl}/api/v1/sync/batch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${publicToken}`,
+      },
+      body: JSON.stringify({
+        deviceId: 'DEVICE-NODE-1',
+        lastSyncTimestamp: 0,
+        outboundEnvelopes: [{
+          ...sampleEnvelope,
+          messageId: 'person-found-1',
+          messageType: 'EMERGENCY',
+          priority: 'CRITICAL',
+          createdAt: now,
+          expiresAt: now + 60_000,
+          senderPseudonym: 'MOBILE-NODE-RESCUE1',
+          payload: {
+            kind: 'RESCUE_SIGNAL',
+            action: 'PERSON_FOUND',
+            targetRequestId: 'HELP-1',
+            targetSenderPseudonym: 'MOBILE-DEVICE-NODE-1',
+            rescuerNodeId: 'NODE-RESCUE1',
+            sentAt: new Date(now).toISOString(),
+          },
+        }],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const updates = tx.syncMessage.update.mock.calls.map((call: any[]) => call[0]);
+    const requestUpdate = updates.find((item: any) => item.where.messageId === 'help-request-1');
+    const foundUpdate = updates.find((item: any) => item.where.messageId === 'person-found-1');
+    expect(requestUpdate.data.payload.location).toBeUndefined();
+    expect(requestUpdate.data.payload.locationObservedAt).toBeUndefined();
+    expect(requestUpdate.data.payload.status).toBe('PERSON_FOUND');
+    expect(requestUpdate.data.payload.locationRedacted).toBe(true);
+    expect(foundUpdate.data.payload.rescuerLocation).toBeUndefined();
+    expect(tx.devicePresence.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { nodeId: 'DEVICE-NODE-1' },
+      data: expect.objectContaining({ latitude: null, longitude: null, locationObservedAt: null }),
+    }));
+  });
+
+  it('redacts a delayed location update that arrives after its rescue was completed', async () => {
+    (prisma.syncMessage.findUnique as any).mockResolvedValue(null);
+    const tx = (prisma as any).__transactionClient;
+    tx.syncMessage.findMany.mockResolvedValue([{
+      payload: {
+        kind: 'RESCUE_SIGNAL',
+        action: 'PERSON_FOUND',
+        targetRequestId: 'HELP-1',
+        targetSenderPseudonym: 'MOBILE-DEVICE-NODE-1',
+      },
+    }]);
+    const now = Date.now();
+    const response = await fetch(`${baseUrl}/api/v1/sync/batch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${publicToken}`,
+      },
+      body: JSON.stringify({
+        deviceId: 'DEVICE-NODE-1',
+        lastSyncTimestamp: 0,
+        outboundEnvelopes: [{
+          ...sampleEnvelope,
+          messageId: 'late-help-location',
+          messageType: 'EMERGENCY',
+          priority: 'CRITICAL',
+          createdAt: now,
+          expiresAt: now + 60_000,
+          senderPseudonym: 'MOBILE-DEVICE-NODE-1',
+          payload: {
+            requestId: 'HELP-1',
+            status: 'REQUESTING_HELP',
+            updateType: 'LOCATION_UPDATE',
+            timestamp: new Date(now).toISOString(),
+            consentToShareLocation: true,
+            location: { lat: 26.9125, lng: 75.7874, accuracyMeters: 5 },
+            locationObservedAt: now,
+          },
+        }],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const update = tx.syncMessage.update.mock.calls
+      .map((call: any[]) => call[0])
+      .find((item: any) => item.where.messageId === 'late-help-location');
+    expect(update.data.payload.location).toBeUndefined();
+    expect(update.data.payload.locationObservedAt).toBeUndefined();
+    expect(update.data.payload.status).toBe('PERSON_FOUND');
   });
 });

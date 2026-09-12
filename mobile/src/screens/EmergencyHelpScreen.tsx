@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import * as Location from 'expo-location';
 
@@ -7,7 +7,12 @@ import { FormSection } from '../components/FormSection';
 import { Screen } from '../components/Screen';
 import { SubmitButton } from '../components/SubmitButton';
 import type { ReportSubmissionService, SubmissionResult } from '../services/ReportSubmissionService';
-import { bearingBetweenDegrees, distanceBetweenMeters } from '../services/RescueNavigation';
+import {
+  bearingBetweenDegrees,
+  distanceBetweenMeters,
+  estimatePreciseLocation,
+  type TimedLocationSample,
+} from '../services/RescueNavigation';
 import type { HelpRescueStatus } from '../services/RescueSignal';
 import type { GeoLocation } from '../../../shared/types/index';
 import { colors, radii, spacing, typography } from '../theme';
@@ -17,6 +22,7 @@ interface EmergencyHelpScreenProps {
   submissions: ReportSubmissionService;
   onBack: () => void;
   onSaved: () => void;
+  onLocationUpdated?: () => void;
   loadHelpStatus: (requestId: string) => Promise<HelpRescueStatus | undefined>;
 }
 
@@ -32,17 +38,41 @@ async function readHelpLocation(): Promise<HelpLocation> {
   }
 
   try {
-    const position = await Promise.race([
-      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
-      new Promise<never>((_resolve, reject) => {
-        setTimeout(() => reject(new Error('Current location lookup timed out.')), 12_000);
-      }),
-    ]);
+    const position = await new Promise<Location.LocationObject>((resolve, reject) => {
+      let best: Location.LocationObject | undefined;
+      let subscription: Location.LocationSubscription | undefined;
+      let finished = false;
+      const timer = setTimeout(() => finish(best), 7_000);
+      function finish(result?: Location.LocationObject, error?: unknown): void {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        subscription?.remove();
+        if (result) resolve(result);
+        else reject(error instanceof Error ? error : new Error('Current location lookup timed out.'));
+      }
+      function consider(candidate: Location.LocationObject): void {
+        const candidateAccuracy = candidate.coords.accuracy ?? Number.POSITIVE_INFINITY;
+        const bestAccuracy = best?.coords.accuracy ?? Number.POSITIVE_INFINITY;
+        if (!best || candidateAccuracy < bestAccuracy) best = candidate;
+        if (candidateAccuracy <= 10) finish(candidate);
+      }
+      void Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 500, distanceInterval: 0 },
+        consider,
+      ).then((value) => {
+        if (finished) value.remove();
+        else subscription = value;
+      }).catch((error: unknown) => finish(best, error));
+      void Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.BestForNavigation })
+        .then(consider)
+        .catch(() => undefined);
+    });
     return { position, source: 'CURRENT' };
   } catch (currentError) {
     const lastKnown = await Location.getLastKnownPositionAsync({
-      maxAge: 10 * 60_000,
-      requiredAccuracy: 500,
+      maxAge: 2 * 60_000,
+      requiredAccuracy: 100,
     });
     if (lastKnown) return { position: lastKnown, source: 'RECENT_LAST_KNOWN' };
     throw currentError;
@@ -61,6 +91,7 @@ export function EmergencyHelpScreen({
   submissions,
   onBack,
   onSaved,
+  onLocationUpdated,
   loadHelpStatus,
 }: EmergencyHelpScreenProps) {
   const [name, setName] = useState('');
@@ -69,6 +100,10 @@ export function EmergencyHelpScreen({
   const [result, setResult] = useState<SubmissionResult>();
   const [requestLocation, setRequestLocation] = useState<GeoLocation>();
   const [rescueStatus, setRescueStatus] = useState<HelpRescueStatus>();
+  const [locationSharingState, setLocationSharingState] = useState<'ACTIVE' | 'WAITING'>('WAITING');
+  const locationUpdateInFlight = useRef(false);
+  const lastLocationUpdateAt = useRef(0);
+  const locationSamples = useRef<TimedLocationSample[]>([]);
 
   useEffect(() => {
     const requestId = result?.referenceId;
@@ -87,6 +122,63 @@ export function EmergencyHelpScreen({
     };
   }, [loadHelpStatus, result?.referenceId]);
 
+  useEffect(() => {
+    const requestId = result?.referenceId;
+    if (!requestId || rescueStatus?.status === 'PERSON_FOUND') {
+      setLocationSharingState('WAITING');
+      return;
+    }
+    let active = true;
+    let subscription: Location.LocationSubscription | undefined;
+    void Location.watchPositionAsync(
+      { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1_000, distanceInterval: 0 },
+      (position) => {
+        if (!active || locationUpdateInFlight.current) return;
+        const now = Date.now();
+        if (now - lastLocationUpdateAt.current < 1_500) return;
+        lastLocationUpdateAt.current = now;
+        locationUpdateInFlight.current = true;
+        const rawLocation: GeoLocation = {
+          lat: Math.round(position.coords.latitude * 1_000_000) / 1_000_000,
+          lng: Math.round(position.coords.longitude * 1_000_000) / 1_000_000,
+          accuracyMeters: position.coords.accuracy ?? undefined,
+        };
+        locationSamples.current = [
+          ...locationSamples.current.filter((sample) => now - sample.observedAt <= 8_000),
+          { location: rawLocation, observedAt: position.timestamp },
+        ].slice(-12);
+        const location = estimatePreciseLocation(locationSamples.current, now) ?? rawLocation;
+        setRequestLocation(location);
+        void submissions.updateEmergencyHelpLocation({
+          requestId,
+          requesterName: name,
+          note,
+          location,
+          locationObservedAt: position.timestamp,
+          locationSource: 'CURRENT',
+        }).then(() => {
+          if (active) {
+            setLocationSharingState('ACTIVE');
+            onLocationUpdated?.();
+          }
+        }).catch(() => {
+          if (active) setLocationSharingState('WAITING');
+        }).finally(() => {
+          locationUpdateInFlight.current = false;
+        });
+      },
+    ).then((value) => {
+      if (active) subscription = value;
+      else value.remove();
+    }).catch(() => {
+      if (active) setLocationSharingState('WAITING');
+    });
+    return () => {
+      active = false;
+      subscription?.remove();
+    };
+  }, [name, note, onLocationUpdated, rescueStatus?.status, result?.referenceId, submissions]);
+
   async function requestHelp(): Promise<void> {
     setBusy(true);
     try {
@@ -99,22 +191,20 @@ export function EmergencyHelpScreen({
         return;
       }
       const { position, source } = await readHelpLocation();
+      const initialLocation: GeoLocation = {
+        lat: Math.round(position.coords.latitude * 1_000_000) / 1_000_000,
+        lng: Math.round(position.coords.longitude * 1_000_000) / 1_000_000,
+        accuracyMeters: position.coords.accuracy ?? undefined,
+      };
+      locationSamples.current = [{ location: initialLocation, observedAt: position.timestamp }];
       const submission = await submissions.submitEmergencyHelp({
         requesterName: name,
         note,
-        location: {
-          lat: Math.round(position.coords.latitude * 1_000_000) / 1_000_000,
-          lng: Math.round(position.coords.longitude * 1_000_000) / 1_000_000,
-          accuracyMeters: position.coords.accuracy ?? undefined,
-        },
+        location: initialLocation,
         locationObservedAt: position.timestamp,
         locationSource: source,
       });
-      setRequestLocation({
-        lat: position.coords.latitude,
-        lng: position.coords.longitude,
-        accuracyMeters: position.coords.accuracy ?? undefined,
-      });
+      setRequestLocation(initialLocation);
       setResult(submission);
       onSaved();
     } catch (error) {
@@ -156,6 +246,9 @@ export function EmergencyHelpScreen({
             2  {result.deliveryState === 'RELAYING' ? 'Sharing with a nearby device' : 'Waiting for a nearby device'}
           </Text>
           <Text style={styles.statusPending}>3  Waiting for confirmed server receipt</Text>
+          <Text style={locationSharingState === 'ACTIVE' ? styles.statusDone : styles.statusPending}>
+            4  {locationSharingState === 'ACTIVE' ? 'Updating your rescue location' : 'Waiting for a precise location update'}
+          </Text>
         </View>
         {rescueStatus?.status === 'PERSON_FOUND' ? (
           <View style={styles.rescuerUpdate}>
@@ -212,7 +305,7 @@ export function EmergencyHelpScreen({
       <View style={styles.consentPanel}>
         <Text style={styles.consentTitle}>Location sharing consent</Text>
         <Text style={styles.consentBody}>
-          By pressing the button below, you agree to share this phone’s current location—or its most recent location from the last ten minutes if GPS cannot update—and its accuracy and observation time with nearby ResQNet devices and authorized responders for rescue coordination.
+          By pressing the button below, you agree to share this phone’s current location and refreshed coordinates while this rescue request remains active. If GPS cannot start, ResQNet may use a recent location from the last ten minutes. Nearby ResQNet devices and authorized responders may carry these updates for rescue coordination.
         </Text>
         <Text style={styles.consentBody}>
           {demoOffline

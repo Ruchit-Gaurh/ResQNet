@@ -56,6 +56,12 @@ export interface MobileMeshActivity {
   receivedCount: number;
   relayedCount: number;
   peerReceiptCount: number;
+  peerSignals?: Array<{
+    nodeId: string;
+    radioPeerId: string;
+    rssi: number;
+    lastSeenAt: number;
+  }>;
   gatewayState: 'NOT_CONNECTED' | 'ACKNOWLEDGED' | 'FAILED';
   lastActivity?: string;
   lastReceived?: {
@@ -89,6 +95,10 @@ export interface MobileServices {
     action: RescueSignalAction,
     rescuerLocation?: GeoLocation,
   ): Promise<{ supported: boolean; sendResult?: MeshSendResult }>;
+  getRescueBluetoothProximity(target: DisasterCase): {
+    rssi: number;
+    lastSeenAt: number;
+  } | undefined;
   getHelpStatus(requestId: string): Promise<HelpRescueStatus | undefined>;
 }
 
@@ -225,12 +235,35 @@ export function createMobileServices(): MobileServices {
     }, 5_000);
   };
 
+  const purgeRescueLocations = async (requestId: string): Promise<void> => {
+    await localQueue.redactRescueLocation(requestId);
+    if (!mesh) return;
+    const queued = await mesh.getQueuedMessages();
+    for (const envelope of queued) {
+      if (envelope.messageType !== 'EMERGENCY' || typeof envelope.payload !== 'object' || envelope.payload === null) continue;
+      const payload = envelope.payload as Record<string, unknown>;
+      const isResolvedRequest = payload.requestId === requestId;
+      const isOldSignal = payload.kind === 'RESCUE_SIGNAL'
+        && payload.targetRequestId === requestId
+        && payload.action !== 'PERSON_FOUND';
+      if (isResolvedRequest || isOldSignal) {
+        await mesh.removeQueuedMessage(envelope.messageId);
+      }
+    }
+    notify();
+  };
+
   const receiveEnvelope = async (
     envelope: MeshEnvelope<unknown>,
     fromNodeId?: string,
   ): Promise<void> => {
     await localQueue.saveReceivedEnvelope(envelope, fromNodeId);
     if (!isRescueSignalEnvelope(envelope)) return;
+    if (envelope.payload.action === 'PERSON_FOUND') {
+      // Every store-carry-forward node removes stale target/rescuer coordinates,
+      // not only the two phones involved in the final encounter.
+      await purgeRescueLocations(envelope.payload.targetRequestId);
+    }
     if (
       envelope.destinationId !== nodeId
       || envelope.payload.targetSenderPseudonym !== `MOBILE-${nodeId}`
@@ -477,6 +510,7 @@ export function createMobileServices(): MobileServices {
           receivedCount: Math.max(nativeActivity.receivedCount, received.length),
           relayedCount: nativeActivity.relayedCount,
           peerReceiptCount: nativeActivity.peerReceiptCount,
+          peerSignals: nativeActivity.peerSignals,
           gatewayState: canSyncBackend
             ? backendGatewayState
             : mesh.getNetworkHealth().lastSuccessfulSyncTimestamp
@@ -607,8 +641,10 @@ export function createMobileServices(): MobileServices {
         targetRequestId: destination.requestId,
         targetSenderPseudonym: destination.senderPseudonym,
         rescuerNodeId: nodeId,
-        rescuerLocation,
-        rescuerLocationObservedAt: rescuerLocation ? createdAt : undefined,
+        // Completion deliberately carries no fresh location. Existing target
+        // and rescuer coordinates are purged after this durable signal queues.
+        rescuerLocation: action === 'PERSON_FOUND' ? undefined : rescuerLocation,
+        rescuerLocationObservedAt: action === 'PERSON_FOUND' || !rescuerLocation ? undefined : createdAt,
         sentAt: new Date(createdAt).toISOString(),
       };
       const sendResult = await mesh.sendMeshMessage({
@@ -627,7 +663,18 @@ export function createMobileServices(): MobileServices {
         destinationId: destination.nodeId,
         payload,
       });
+      if (action === 'PERSON_FOUND') {
+        await purgeRescueLocations(destination.requestId);
+      }
       return { supported: true, sendResult };
+    },
+
+    getRescueBluetoothProximity(target) {
+      if (!nativeMesh) return undefined;
+      const destination = rescueSignalTarget(target);
+      if (!destination) return undefined;
+      const signal = nativeMesh.getActivity().peerSignals.find((item) => item.nodeId === destination.nodeId);
+      return signal ? { rssi: signal.rssi, lastSeenAt: signal.lastSeenAt } : undefined;
     },
 
     async getHelpStatus(requestId) {
@@ -660,6 +707,7 @@ export function createMobileServices(): MobileServices {
           activeAlertRequestId = undefined;
           await stopNearbyRescuerAlert();
         }
+        if (localStatus?.status === 'PERSON_FOUND') await purgeRescueLocations(requestId);
         return localStatus;
       }
       try {
@@ -684,6 +732,7 @@ export function createMobileServices(): MobileServices {
         activeAlertRequestId = undefined;
         await stopNearbyRescuerAlert();
       }
+      if (localStatus?.status === 'PERSON_FOUND') await purgeRescueLocations(requestId);
       return localStatus;
     },
   };

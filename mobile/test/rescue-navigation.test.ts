@@ -3,14 +3,35 @@ import test from 'node:test';
 
 import {
   bearingBetweenDegrees,
+  bluetoothApproachGuidance,
   calculateRescueGuidance,
   directionInstruction,
   distanceBetweenMeters,
+  estimatePreciseLocation,
+  isGpsBearingReliable,
   normalizeAngle,
   smoothCircularDegrees,
   smoothGeoLocation,
+  smoothMovingLocation,
   unwrapAngleDegrees,
 } from '../src/services/RescueNavigation';
+
+test('Bluetooth approach guidance remains coarse and never invents distance', () => {
+  const nearby = bluetoothApproachGuidance(-78);
+  const strong = bluetoothApproachGuidance(-62);
+  const veryStrong = bluetoothApproachGuidance(-48);
+  assert.equal(nearby.strength, 'NEARBY');
+  assert.equal(strong.strength, 'STRONG');
+  assert.equal(veryStrong.strength, 'VERY_STRONG');
+  assert.doesNotMatch(`${nearby.label} ${nearby.detail}`, /\d+\s*(m|meter)/i);
+});
+
+test('classifies whether GPS bearing is trustworthy at close range', () => {
+  assert.equal(isGpsBearingReliable(80, 5, 8), true);
+  assert.equal(isGpsBearingReliable(12, 3, 4), true);
+  assert.equal(isGpsBearingReliable(12, 8, 10), false);
+  assert.equal(isGpsBearingReliable(30, 25, 20), false);
+});
 import { RescueTargetService } from '../src/services/RescueTargetService';
 import { isRescueSignalEnvelope, rescueSignalTarget } from '../src/services/RescueSignal';
 import { InMemoryLocalStorage, LocalQueueService } from '../src/services/LocalQueueService';
@@ -37,6 +58,25 @@ test('smooths compass updates across north without making a full-circle jump', (
   assert.equal(unwrapAngleDegrees(175, -175), 185);
   const location = smoothGeoLocation({ lat: 10, lng: 20 }, { lat: 12, lng: 24, accuracyMeters: 8 }, 0.25);
   assert.deepEqual(location, { lat: 10.5, lng: 21, accuracyMeters: 8 });
+});
+
+test('combines recent accurate requester fixes without claiming invented accuracy', () => {
+  const estimate = estimatePreciseLocation([
+    { location: { lat: 26.900000, lng: 75.800000, accuracyMeters: 8 }, observedAt: 9_000 },
+    { location: { lat: 26.900010, lng: 75.800010, accuracyMeters: 6 }, observedAt: 9_500 },
+    { location: { lat: 26.910000, lng: 75.810000, accuracyMeters: 80 }, observedAt: 9_900 },
+  ], 10_000);
+  assert.ok(estimate);
+  assert.ok(Math.abs(estimate.lat - 26.90001) < 0.00002);
+  assert.equal(estimate.accuracyMeters, 6);
+});
+
+test('rescuer smoothing follows real movement immediately but damps stationary jitter', () => {
+  const origin = { lat: 26.900000, lng: 75.800000, accuracyMeters: 6 };
+  const jitter = smoothMovingLocation(origin, { lat: 26.900005, lng: 75.800005, accuracyMeters: 8 });
+  const moved = { lat: 26.900100, lng: 75.800000, accuracyMeters: 6 };
+  assert.ok(jitter.lat < 26.900005);
+  assert.deepEqual(smoothMovingLocation(origin, moved), moved);
 });
 
 test('targets rescue signals only to the originating emergency device', () => {
@@ -172,6 +212,10 @@ test('mesh-received emergency help becomes an urgent rescuer target', async () =
   assert.equal(result.targets[0]?.createdById, 'PHONE-A');
 
   await service.markFound('EMERGENCY-HELP-1');
+  assert.equal(
+    (await storage.getItem('@resqnet/rescue-targets/v1'))?.includes('26.9124'),
+    false,
+  );
   const afterRestart = new RescueTargetService(storage, queue, failingFetch as typeof fetch);
   assert.equal((await afterRestart.getTargets('https://offline.example')).targets.length, 0);
 });

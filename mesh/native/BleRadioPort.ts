@@ -45,6 +45,8 @@ export interface BleRadioStatus extends BleRadioCapabilities {
 export interface BlePeerEvent {
   peerId: string;
   lastSeenAt: number;
+  /** Received signal strength from Android scanning. Proximity evidence only. */
+  rssi?: number;
 }
 
 export interface BleConnectionEvent {

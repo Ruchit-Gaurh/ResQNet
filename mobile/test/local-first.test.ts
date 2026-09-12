@@ -36,10 +36,16 @@ test('missing, found, safe, sighting, and emergency help submissions persist bef
     location: { lat: 26.9124, lng: 75.7873, accuracyMeters: 18 },
     locationObservedAt: 1_700_000_000_000,
   });
+  await submissions.updateEmergencyHelpLocation({
+    requestId: helpResult.referenceId!,
+    requesterName: 'Aman',
+    location: { lat: 26.9125, lng: 75.7874, accuracyMeters: 5 },
+    locationObservedAt: 1_700_000_003_000,
+  });
 
   const restoredQueue = new LocalQueueService(storage);
   const records = await restoredQueue.getRecords();
-  assert.equal(records.length, 5);
+  assert.equal(records.length, 6);
   assert.deepEqual(
     new Set(records.map((record) => record.envelope.messageType)),
     new Set(['MISSING_PERSON', 'FOUND_PERSON', 'SAFE_STATUS', 'SIGHTING', 'EMERGENCY']),
@@ -51,6 +57,11 @@ test('missing, found, safe, sighting, and emergency help submissions persist bef
   assert.equal((emergency?.envelope.payload as { consentToShareLocation?: boolean }).consentToShareLocation, true);
   assert.equal((emergency?.envelope.payload as { locationSource?: string }).locationSource, 'CURRENT');
   assert.equal(helpResult.referenceId, (emergency?.envelope.payload as { requestId?: string }).requestId);
+  const locationUpdate = records.find((record) => (
+    record.envelope.payload as { updateType?: string }
+  ).updateType === 'LOCATION_UPDATE');
+  assert.equal((locationUpdate?.envelope.payload as { requestId?: string }).requestId, helpResult.referenceId);
+  assert.equal((locationUpdate?.envelope.payload as { location?: { accuracyMeters?: number } }).location?.accuracyMeters, 5);
 });
 
 test('local save survives a transport error and does not claim delivery', async () => {
@@ -63,6 +74,7 @@ test('local save survives a transport error and does not claim delivery', async 
     },
     async getNearbyPeers() { return []; },
     async getQueuedMessages() { return []; },
+    async removeQueuedMessage() {},
     getNetworkHealth() {
       return {
         connectivity: 'ISOLATED' as const,
@@ -177,6 +189,54 @@ test('received peer envelope is deduplicated and does not become an owned case',
 
   assert.equal((await localQueue.getReceivedRecords()).length, 1);
   assert.equal((await localQueue.getCases()).length, 0);
+});
+
+test('person-found cleanup redacts persisted target and rescuer coordinates', async () => {
+  const storage = new InMemoryLocalStorage();
+  const localQueue = new LocalQueueService(storage, () => 1_700_000_000_000);
+  const request: MeshEnvelope<unknown> = {
+    messageId: 'help-location',
+    messageType: 'EMERGENCY',
+    priority: 'CRITICAL',
+    createdAt: 1_700_000_000_000,
+    expiresAt: 1_700_003_600_000,
+    hopCount: 0,
+    maxHops: 5,
+    senderPseudonym: 'MOBILE-NODE-A1B2C3D4',
+    destinationType: 'GATEWAY',
+    payload: {
+      requestId: 'HELP-PRIVATE',
+      status: 'REQUESTING_HELP',
+      location: { lat: 26.9124, lng: 75.7873, accuracyMeters: 8 },
+      locationObservedAt: 1_700_000_000_000,
+    },
+  };
+  const signal: MeshEnvelope<unknown> = {
+    ...request,
+    messageId: 'rescuer-location',
+    senderPseudonym: 'MOBILE-NODE-RESCUE1',
+    payload: {
+      kind: 'RESCUE_SIGNAL',
+      action: 'RESCUER_LOCATION',
+      targetRequestId: 'HELP-PRIVATE',
+      targetSenderPseudonym: 'MOBILE-NODE-A1B2C3D4',
+      rescuerLocation: { lat: 26.913, lng: 75.788, accuracyMeters: 6 },
+      rescuerLocationObservedAt: 1_700_000_001_000,
+    },
+  };
+  await localQueue.saveEnvelope(request);
+  await localQueue.saveReceivedEnvelope(signal, 'NODE-RESCUE1');
+
+  await localQueue.redactRescueLocation('HELP-PRIVATE');
+
+  const storedRequest = (await localQueue.getRecords())[0]?.envelope.payload as Record<string, unknown>;
+  const storedSignal = (await localQueue.getReceivedRecords())[0]?.envelope.payload as Record<string, unknown>;
+  assert.equal(storedRequest.status, 'PERSON_FOUND');
+  assert.equal(storedRequest.locationRedacted, true);
+  assert.equal('location' in storedRequest, false);
+  assert.equal('locationObservedAt' in storedRequest, false);
+  assert.equal('rescuerLocation' in storedSignal, false);
+  assert.equal('rescuerLocationObservedAt' in storedSignal, false);
 });
 
 test('gateway reconciliation updates owned cases without importing another family case', async () => {

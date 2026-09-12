@@ -21,6 +21,7 @@ export interface MeshTransportService {
   sendMeshMessage(envelope: MeshEnvelope<unknown>): Promise<MeshSendResult>;
   getNearbyPeers(): Promise<MeshPeer[]>;
   getQueuedMessages(): Promise<MeshEnvelope<unknown>[]>;
+  removeQueuedMessage(messageId: string): Promise<void>;
   getNetworkHealth(): NetworkHealthStatus;
   onMessageReceived(callback: (envelope: MeshEnvelope<unknown>) => void): () => void;
   syncWithGateway(

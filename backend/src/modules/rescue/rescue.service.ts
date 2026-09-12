@@ -10,8 +10,8 @@ interface HelpState {
   requestId: string;
   requesterName?: string;
   note?: string;
-  location: Coordinate;
-  locationObservedAt: number;
+  location?: Coordinate;
+  locationObservedAt?: number;
   requestedAt: string;
   senderPseudonym: string;
   sourceMessageId: string;
@@ -50,6 +50,26 @@ async function readHelpStates(): Promise<Map<string, HelpState>> {
     const payload = objectValue(message.payload);
     if (!payload) continue;
     const requestLocation = coordinate(payload.location);
+    if (
+      payload.status === 'PERSON_FOUND'
+      && payload.locationRedacted === true
+      && typeof payload.requestId === 'string'
+      && typeof payload.timestamp === 'string'
+    ) {
+      states.set(payload.requestId, {
+        requestId: payload.requestId,
+        requesterName: typeof payload.requesterName === 'string' ? payload.requesterName : undefined,
+        note: typeof payload.note === 'string' ? payload.note : undefined,
+        requestedAt: payload.timestamp,
+        senderPseudonym: message.senderPseudonym,
+        sourceMessageId: message.messageId,
+        status: 'PERSON_FOUND',
+        updatedAt: typeof payload.locationRedactedAt === 'string'
+          ? payload.locationRedactedAt
+          : message.processedAt.toISOString(),
+      });
+      continue;
+    }
     if (
       payload.status === 'REQUESTING_HELP'
       && payload.consentToShareLocation === true
@@ -103,6 +123,7 @@ export const rescueService = {
     const states = await readHelpStates();
     return [...states.values()]
       .filter((item) => item.status !== 'PERSON_FOUND')
+      .filter((item): item is HelpState & { location: Coordinate; locationObservedAt: number } => Boolean(item.location && item.locationObservedAt))
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   },
 

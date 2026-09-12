@@ -8,6 +8,60 @@ export interface RescueGuidance {
   relativeBearing: number;
 }
 
+export interface BluetoothApproachGuidance {
+  label: string;
+  detail: string;
+  strength: 'NEARBY' | 'STRONG' | 'VERY_STRONG';
+}
+
+export interface TimedLocationSample {
+  location: GeoLocation;
+  observedAt: number;
+}
+
+/**
+ * BLE RSSI is intentionally presented as coarse proximity, never meters or a
+ * direction. Walls, pockets, antennas and the human body can change it sharply.
+ */
+export function bluetoothApproachGuidance(rssi: number): BluetoothApproachGuidance {
+  if (rssi >= -55) {
+    return {
+      label: 'Target phone signal is very strong',
+      detail: 'Move slowly and use the phone alert to pinpoint the person.',
+      strength: 'VERY_STRONG',
+    };
+  }
+  if (rssi >= -68) {
+    return {
+      label: 'Target phone is in close Bluetooth range',
+      detail: 'Continue toward the reported point and watch for a stronger signal.',
+      strength: 'STRONG',
+    };
+  }
+  return {
+    label: 'Target phone detected nearby',
+    detail: 'Bluetooth confirms proximity, but cannot provide an exact direction.',
+    strength: 'NEARBY',
+  };
+}
+
+export function isGpsBearingReliable(
+  distanceMeters: number,
+  currentAccuracyMeters?: number,
+  targetAccuracyMeters?: number,
+): boolean {
+  const currentUncertainty = Number.isFinite(currentAccuracyMeters) ? Math.max(0, currentAccuracyMeters!) : 15;
+  const targetUncertainty = Number.isFinite(targetAccuracyMeters) ? Math.max(0, targetAccuracyMeters!) : 15;
+  // If the target can plausibly be on either side of the phone, a compass arrow
+  // may reverse even though the responder is moving correctly. Hide it until
+  // the separation is safely larger than the combined GPS uncertainty.
+  // Independent GPS errors combine by root-sum-square, not simple addition.
+  // A small margin absorbs normal jitter without hiding useful 10–15 m guidance.
+  const combinedUncertainty = Math.hypot(currentUncertainty, targetUncertainty);
+  const uncertaintyRadius = Math.max(8, combinedUncertainty * 1.15);
+  return distanceMeters >= uncertaintyRadius;
+}
+
 function radians(value: number): number {
   return value * Math.PI / 180;
 }
@@ -40,6 +94,59 @@ export function smoothGeoLocation(
     lng: previous.lng + (next.lng - previous.lng) * boundedFactor,
     accuracyMeters: next.accuracyMeters,
   };
+}
+
+/**
+ * Stabilizes a stationary requester's position from recent Android fixes.
+ * Poor outliers are excluded and the result never claims better accuracy than
+ * the best value reported by the device hardware.
+ */
+export function estimatePreciseLocation(
+  samples: TimedLocationSample[],
+  now: number,
+  windowMs = 8_000,
+): GeoLocation | undefined {
+  const recent = samples.filter((sample) => (
+    Number.isFinite(sample.location.lat)
+    && Number.isFinite(sample.location.lng)
+    && Number.isFinite(sample.observedAt)
+    && now - sample.observedAt <= windowMs
+  ));
+  if (recent.length === 0) return undefined;
+
+  const accuracyOf = (sample: TimedLocationSample) => (
+    Number.isFinite(sample.location.accuracyMeters)
+      ? Math.max(3, sample.location.accuracyMeters!)
+      : 25
+  );
+  const bestAccuracy = Math.min(...recent.map(accuracyOf));
+  const usable = recent.filter((sample) => accuracyOf(sample) <= Math.max(15, bestAccuracy * 1.8));
+  let totalWeight = 0;
+  let weightedLatitude = 0;
+  let weightedLongitude = 0;
+  for (const sample of usable) {
+    const accuracy = accuracyOf(sample);
+    const ageFactor = Math.max(0.35, 1 - Math.max(0, now - sample.observedAt) / windowMs);
+    const weight = ageFactor / (accuracy * accuracy);
+    totalWeight += weight;
+    weightedLatitude += sample.location.lat * weight;
+    weightedLongitude += sample.location.lng * weight;
+  }
+  if (totalWeight === 0) return recent[recent.length - 1]?.location;
+  return {
+    lat: weightedLatitude / totalWeight,
+    lng: weightedLongitude / totalWeight,
+    accuracyMeters: bestAccuracy,
+  };
+}
+
+/** Follow real rescuer movement promptly while damping stationary GPS jitter. */
+export function smoothMovingLocation(previous: GeoLocation, next: GeoLocation): GeoLocation {
+  const movement = distanceBetweenMeters(previous, next);
+  const previousAccuracy = Number.isFinite(previous.accuracyMeters) ? previous.accuracyMeters! : 20;
+  const nextAccuracy = Number.isFinite(next.accuracyMeters) ? next.accuracyMeters! : 20;
+  if (movement >= Math.max(4, Math.min(15, nextAccuracy * 0.75))) return next;
+  return smoothGeoLocation(previous, next, nextAccuracy < previousAccuracy ? 0.65 : 0.3);
 }
 
 export function distanceBetweenMeters(from: GeoLocation, to: GeoLocation): number {

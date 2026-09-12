@@ -103,6 +103,7 @@ export class AndroidBleRadioPort implements BleRadioPort {
     const subscription = ResQNetBle.addListener('onPeerFound', (event) => callback({
       peerId: stringValue(event.peerId),
       lastSeenAt: numberValue(event.lastSeenAt, Date.now()),
+      rssi: typeof event.rssi === 'number' ? numberValue(event.rssi, -127) : undefined,
     }));
     return () => subscription.remove();
   }
